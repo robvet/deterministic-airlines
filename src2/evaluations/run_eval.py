@@ -154,11 +154,11 @@ def run_evaluation(
                 print(f"  {metric_name}: {value}")
     
     print("-" * 60)
-    print(f"✓ Results saved to: {output_path}")
+    print(f"[OK] Results saved to: {output_path}")
     
     if log_to_foundry and azure_ai_project:
-        print(f"✓ Results logged to Foundry project: {azure_ai_project['project_name']}")
-        print("  View in portal: https://ai.azure.com → Evaluation")
+        print(f"[OK] Results logged to Foundry project: {azure_ai_project['project_name']}")
+        print("  View in portal: https://ai.azure.com -> Evaluation")
     
     return result
 
