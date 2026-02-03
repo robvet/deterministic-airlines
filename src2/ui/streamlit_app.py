@@ -382,7 +382,7 @@ with left:
                     files = sorted([f for f in os.listdir(results_dir) if f.endswith('.json')], reverse=True)
                     if files:
                         latest = os.path.join(results_dir, files[0])
-                        with open(latest, 'r') as f:
+                        with open(latest, 'r', encoding='utf-8') as f:
                             data = json.load(f)
                         st.session_state.eval_output = {
                             "title": f"Latest Results: {files[0]}",
@@ -406,7 +406,33 @@ with left:
             if output.get("success"):
                 st.success("Completed successfully")
                 if output.get("data"):
-                    st.json(output["data"])
+                    # Show summary metrics first
+                    data = output["data"]
+                    metrics = data.get("metrics", {})
+                    rows = data.get("rows", [])
+                    
+                    if metrics:
+                        st.markdown("##### Aggregate Scores (1-5 scale)")
+                        m1, m2, m3, m4 = st.columns(4)
+                        m1.metric("Relevance", f"{metrics.get('relevance.relevance', 0):.2f}")
+                        m2.metric("Coherence", f"{metrics.get('coherence.coherence', 0):.2f}")
+                        m3.metric("Groundedness", f"{metrics.get('groundedness.groundedness', 0):.2f}")
+                        m4.metric("Fluency", f"{metrics.get('fluency.fluency', 0):.2f}")
+                        
+                        st.markdown("##### Pass Rates (threshold: 3)")
+                        p1, p2, p3, p4 = st.columns(4)
+                        p1.metric("Relevance", f"{metrics.get('relevance.binary_aggregate', 0)*100:.0f}%")
+                        p2.metric("Coherence", f"{metrics.get('coherence.binary_aggregate', 0)*100:.0f}%")
+                        p3.metric("Groundedness", f"{metrics.get('groundedness.binary_aggregate', 0)*100:.0f}%")
+                        p4.metric("Fluency", f"{metrics.get('fluency.binary_aggregate', 0)*100:.0f}%")
+                    
+                    if rows:
+                        st.caption(f"📋 {len(rows)} test cases evaluated")
+                    
+                    # View Full JSON button
+                    with st.expander("📄 View Full JSON", expanded=False):
+                        st.json(data)
+                
                 elif output.get("stdout"):
                     st.code(output["stdout"][-2000:] if len(output.get("stdout", "")) > 2000 else output["stdout"])
             else:
