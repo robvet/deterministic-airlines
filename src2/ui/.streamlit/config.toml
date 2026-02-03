@@ -1,0 +1,17 @@
+# Streamlit Configuration
+# See: https://docs.streamlit.io/library/advanced-features/configuration
+
+[server]
+# Don't auto-open browser - let start-app.ps1 handle it
+headless = true
+
+# Run on port 8501 (default)
+port = 8501
+
+[browser]
+# Don't collect usage stats
+gatherUsageStats = false
+
+[theme]
+# Use dark theme to match the app styling
+base = "dark"

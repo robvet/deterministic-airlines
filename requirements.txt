@@ -1,0 +1,26 @@
+openai-agents
+openai-chatkit
+pydantic
+fastapi
+uvicorn
+azure-identity
+litellm
+python-dotenv
+streamlit
+
+pydantic[dotenv]
+pydantic-settings
+
+debugpy  # Required for VS Code debugging
+
+# Azure AI Evaluation - for running evaluators and logging to Foundry
+azure-ai-evaluation
+azure-ai-projects
+
+# OpenTelemetry - pinned to compatible versions
+opentelemetry-api==1.39.0
+opentelemetry-sdk==1.39.0
+opentelemetry-instrumentation-fastapi==0.60b0
+opentelemetry-instrumentation-logging==0.60b0
+opentelemetry-instrumentation-httpx==0.60b0
+azure-monitor-opentelemetry-exporter==1.0.0b46

@@ -1,0 +1,54 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Workshop: Backend API",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src2/run.py",
+            "cwd": "${workspaceFolder}/src2",
+            "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+            "envFile": "${workspaceFolder}/.env",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Workshop: Console REPL",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src2/main.py",
+            "cwd": "${workspaceFolder}/src2",
+            "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+            "envFile": "${workspaceFolder}/.env",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Workshop: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "cwd": "${workspaceFolder}/src2",
+            "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+            "envFile": "${workspaceFolder}/.env",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "(Old) Backend: uvicorn",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "uvicorn",
+            "args": [
+                "run:app",
+                "--reload",
+                "--host", "0.0.0.0",
+                "--port", "8000"
+            ],
+            "cwd": "${workspaceFolder}/src2",
+            "envFile": "${workspaceFolder}/.env",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        }
+    ]
+}
