@@ -123,9 +123,9 @@ def generate_test_data(
         result = call_agent(query, api_url)
         
         if result["success"]:
-            print(f"✓ → {result['routed_to']}")
+            print(f"[OK] -> {result['routed_to']}")
         else:
-            print(f"✗ Error")
+            print(f"[FAIL] Error")
         
         # Format for azure-ai-evaluation
         eval_record = {
@@ -146,7 +146,7 @@ def generate_test_data(
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
     
     print("-" * 60)
-    print(f"✓ Generated {len(results)} records → {output_path}")
+    print(f"[OK] Generated {len(results)} records -> {output_path}")
     
     # Summary stats
     successful = sum(1 for r in results if r["routed_to"] != "error")

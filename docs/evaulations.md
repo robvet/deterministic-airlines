@@ -62,6 +62,24 @@ it will warn you
 ==============================================================
 
 
+## Evaluation Workflow
+
+The evaluation system has two steps that produce artifacts:
+
+### Step 1: Generate Test Data
+
+**What happens:**
+- Sends 16 predefined queries to your running agent
+- Agent responds to each query
+- Captures query + response + routing info
+
+**Artifact created:**
+
+(16 lines, one JSON object per query/response pair)
+
+**Sample line:**
+```json
+{"query": "What is baggage policy?", "response": "...", "routed_to": "faq", ...}
 
 
 

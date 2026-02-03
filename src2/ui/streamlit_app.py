@@ -123,6 +123,301 @@ with left:
         st.text("Input validation: Enabled")
         st.text("Output filtering: Enabled")
     
+    # ==========================================================================
+    # EVALUATIONS - Run evaluation steps from the dashboard
+    # ==========================================================================
+    with st.expander("📊 Evaluations", expanded=False):
+        import os
+        import sys
+        import subprocess
+        from datetime import datetime
+        
+        # Helper to get file age info
+        def get_file_age_info(filepath):
+            """Returns (exists, age_str) for a file."""
+            if not os.path.exists(filepath):
+                return False, None
+            mtime = os.path.getmtime(filepath)
+            age_seconds = (datetime.now() - datetime.fromtimestamp(mtime)).total_seconds()
+            
+            if age_seconds < 60:
+                age_str = "just now"
+            elif age_seconds < 3600:
+                mins = int(age_seconds / 60)
+                age_str = f"{mins} minute{'s' if mins != 1 else ''} ago"
+            elif age_seconds < 86400:
+                hours = int(age_seconds / 3600)
+                age_str = f"{hours} hour{'s' if hours != 1 else ''} ago"
+            else:
+                days = int(age_seconds / 86400)
+                age_str = f"{days} day{'s' if days != 1 else ''} ago"
+            
+            return True, age_str
+        
+        def get_results_info(results_dir):
+            """Returns (count, latest_age) for result files."""
+            if not os.path.exists(results_dir):
+                return 0, None
+            files = [f for f in os.listdir(results_dir) if f.endswith('.json')]
+            if not files:
+                return 0, None
+            latest = max(files, key=lambda f: os.path.getmtime(os.path.join(results_dir, f)))
+            _, age_str = get_file_age_info(os.path.join(results_dir, latest))
+            return len(files), age_str
+        
+        src2_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        test_data_path = os.path.join(src2_dir, "evaluations", "data", "test_data.jsonl")
+        results_dir = os.path.join(src2_dir, "evaluations", "results")
+        test_data_exists, test_data_age = get_file_age_info(test_data_path)
+        results_count, results_age = get_results_info(results_dir)
+        
+        # Initialize state
+        if "eval_output" not in st.session_state:
+            st.session_state.eval_output = None
+        if "eval_running" not in st.session_state:
+            st.session_state.eval_running = False
+        if "confirm_overwrite" not in st.session_state:
+            st.session_state.confirm_overwrite = False
+        if "confirm_delete_testdata" not in st.session_state:
+            st.session_state.confirm_delete_testdata = False
+        if "confirm_delete_results" not in st.session_state:
+            st.session_state.confirm_delete_results = False
+        if "log_to_foundry" not in st.session_state:
+            st.session_state.log_to_foundry = False
+        
+        # Use the same Python interpreter that's running Streamlit (venv)
+        python_exe = sys.executable
+        
+        # =======================================================================
+        # ROW 1: Generate Test Data | Run Evaluation | View Results | Delete
+        # =======================================================================
+        col1, col2, col3, col4 = st.columns([3, 3, 3, 1])
+        
+        with col1:
+            # Generate Test Data with confirmation if file exists
+            if st.session_state.confirm_overwrite:
+                st.warning(f"Overwrite test data ({test_data_age})?")
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("Yes", key="confirm_yes", use_container_width=True):
+                        st.session_state.confirm_overwrite = False
+                        st.session_state.eval_command = "generate"
+                        st.session_state.eval_running = True
+                        st.rerun()
+                with c2:
+                    if st.button("No", key="confirm_no", use_container_width=True):
+                        st.session_state.confirm_overwrite = False
+                        st.rerun()
+            else:
+                if st.button("📝 Generate Test Data", use_container_width=True, 
+                            help="Run 16 test queries through agent",
+                            disabled=st.session_state.eval_running):
+                    if test_data_exists:
+                        st.session_state.confirm_overwrite = True
+                        st.rerun()
+                    else:
+                        st.session_state.eval_command = "generate"
+                        st.session_state.eval_running = True
+                        st.rerun()
+        
+        with col2:
+            if st.button("🧪 Run Evaluation", use_container_width=True,
+                        help="Evaluate responses using GPT as judge",
+                        disabled=st.session_state.eval_running or not test_data_exists):
+                st.session_state.eval_command = "eval"
+                st.session_state.eval_running = True
+                st.rerun()
+        
+        with col3:
+            if st.button("🔍 View Results", use_container_width=True,
+                        help="View latest evaluation results",
+                        disabled=results_count == 0):
+                st.session_state.eval_command = "view_results"
+                st.rerun()
+        
+        with col4:
+            # Delete test data
+            if st.session_state.confirm_delete_testdata:
+                if st.button("❌", key="del_td_confirm", use_container_width=True, help="Confirm delete"):
+                    if os.path.exists(test_data_path):
+                        os.remove(test_data_path)
+                    st.session_state.confirm_delete_testdata = False
+                    st.session_state.eval_output = {"title": "Deleted", "success": True, "stdout": "test_data.jsonl deleted"}
+                    st.rerun()
+            else:
+                if st.button("🗑️", key="del_testdata", use_container_width=True, 
+                            help="Delete test_data.jsonl",
+                            disabled=not test_data_exists):
+                    st.session_state.confirm_delete_testdata = True
+                    st.rerun()
+        
+        # =======================================================================
+        # ROW 2: Log to Foundry checkbox | Status info | | Delete results
+        # =======================================================================
+        col5, col6, col7, col8 = st.columns([3, 3, 3, 1])
+        
+        with col5:
+            st.session_state.log_to_foundry = st.checkbox(
+                "☁️ Log to Foundry", 
+                value=st.session_state.log_to_foundry,
+                help="Upload evaluation results to Azure AI Foundry portal"
+            )
+        
+        with col6:
+            if test_data_exists:
+                st.caption(f"📄 Test data: {test_data_age}")
+            else:
+                st.caption("📄 No test data")
+        
+        with col7:
+            if results_count > 0:
+                st.caption(f"📊 {results_count} result(s), latest: {results_age}")
+            else:
+                st.caption("📊 No results yet")
+        
+        with col8:
+            # Delete all results
+            if st.session_state.confirm_delete_results:
+                if st.button("❌", key="del_res_confirm", use_container_width=True, help="Confirm delete all"):
+                    if os.path.exists(results_dir):
+                        for f in os.listdir(results_dir):
+                            if f.endswith('.json'):
+                                os.remove(os.path.join(results_dir, f))
+                    st.session_state.confirm_delete_results = False
+                    st.session_state.eval_output = {"title": "Deleted", "success": True, "stdout": f"Deleted {results_count} result file(s)"}
+                    st.rerun()
+            else:
+                if st.button("🗑️", key="del_results", use_container_width=True,
+                            help="Delete all result files",
+                            disabled=results_count == 0):
+                    st.session_state.confirm_delete_results = True
+                    st.rerun()
+        
+        # =======================================================================
+        # Process evaluation commands
+        # =======================================================================
+        if st.session_state.get("eval_command"):
+            cmd = st.session_state.eval_command
+            st.session_state.eval_command = None
+            
+            if cmd == "generate":
+                with st.spinner("Generating test data (running 16 queries)..."):
+                    try:
+                        # Delete old evaluation results since they'll be invalid with new test data
+                        deleted_count = 0
+                        if os.path.exists(results_dir):
+                            for f in os.listdir(results_dir):
+                                if f.endswith('.json'):
+                                    os.remove(os.path.join(results_dir, f))
+                                    deleted_count += 1
+                        
+                        # Set PYTHONIOENCODING to handle Unicode output
+                        env = os.environ.copy()
+                        env["PYTHONIOENCODING"] = "utf-8"
+                        
+                        result = subprocess.run(
+                            [python_exe, "-m", "evaluations.generate_test_data"],
+                            cwd=src2_dir,
+                            capture_output=True,
+                            text=True,
+                            timeout=120,
+                            env=env
+                        )
+                        
+                        # Append cleanup info to output
+                        cleanup_msg = f"\n[Cleanup] Deleted {deleted_count} old evaluation result(s)" if deleted_count > 0 else ""
+                        st.session_state.eval_output = {
+                            "title": "Generate Test Data",
+                            "success": result.returncode == 0,
+                            "stdout": result.stdout + cleanup_msg,
+                            "stderr": result.stderr
+                        }
+                    except subprocess.TimeoutExpired:
+                        st.session_state.eval_output = {"title": "Generate Test Data", "success": False, "stderr": "Timeout after 120s"}
+                    except Exception as e:
+                        st.session_state.eval_output = {"title": "Generate Test Data", "success": False, "stderr": str(e)}
+                st.session_state.eval_running = False
+                st.rerun()
+            
+            elif cmd == "eval":
+                # Check if logging to Foundry
+                log_foundry = st.session_state.log_to_foundry
+                spinner_msg = "Running evaluation + uploading to Foundry..." if log_foundry else "Running evaluation (GPT judge scoring)..."
+                
+                with st.spinner(spinner_msg):
+                    try:
+                        eval_cmd = [python_exe, "-m", "evaluations.run_eval", "--data", "evaluations/data/test_data.jsonl"]
+                        if log_foundry:
+                            eval_cmd.append("--log-to-foundry")
+                        
+                        # Set PYTHONIOENCODING to handle Unicode from Azure SDK
+                        env = os.environ.copy()
+                        env["PYTHONIOENCODING"] = "utf-8"
+                        
+                        result = subprocess.run(
+                            eval_cmd,
+                            cwd=src2_dir,
+                            capture_output=True,
+                            text=True,
+                            timeout=240 if log_foundry else 180,
+                            env=env
+                        )
+                        title = "Run Evaluation + Foundry" if log_foundry else "Run Evaluation (Local)"
+                        st.session_state.eval_output = {
+                            "title": title,
+                            "success": result.returncode == 0,
+                            "stdout": result.stdout,
+                            "stderr": result.stderr
+                        }
+                    except subprocess.TimeoutExpired:
+                        st.session_state.eval_output = {"title": "Run Evaluation", "success": False, "stderr": "Timeout"}
+                    except Exception as e:
+                        st.session_state.eval_output = {"title": "Run Evaluation", "success": False, "stderr": str(e)}
+                st.session_state.eval_running = False
+                st.rerun()
+            
+            elif cmd == "view_results":
+                import json
+                if os.path.exists(results_dir):
+                    files = sorted([f for f in os.listdir(results_dir) if f.endswith('.json')], reverse=True)
+                    if files:
+                        latest = os.path.join(results_dir, files[0])
+                        with open(latest, 'r') as f:
+                            data = json.load(f)
+                        st.session_state.eval_output = {
+                            "title": f"Latest Results: {files[0]}",
+                            "success": True,
+                            "data": data
+                        }
+                    else:
+                        st.session_state.eval_output = {"title": "View Results", "success": False, "stderr": "No result files found"}
+                else:
+                    st.session_state.eval_output = {"title": "View Results", "success": False, "stderr": "Results directory not found"}
+                st.rerun()
+        
+        # =======================================================================
+        # Display output
+        # =======================================================================
+        if st.session_state.eval_output:
+            st.divider()
+            output = st.session_state.eval_output
+            st.markdown(f"**{output['title']}**")
+            
+            if output.get("success"):
+                st.success("Completed successfully")
+                if output.get("data"):
+                    st.json(output["data"])
+                elif output.get("stdout"):
+                    st.code(output["stdout"][-2000:] if len(output.get("stdout", "")) > 2000 else output["stdout"])
+            else:
+                st.error("Failed")
+                if output.get("stderr"):
+                    st.code(output["stderr"][-1000:] if len(output.get("stderr", "")) > 1000 else output["stderr"])
+            
+            if st.button("Clear Output", use_container_width=False):
+                st.session_state.eval_output = None
+                st.rerun()
+    
     # Runner Output / API Status
     with st.expander("📡 API Status", expanded=False):
         try:
