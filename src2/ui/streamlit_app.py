@@ -4,10 +4,16 @@ Streamlit UI for Deterministic Airlines Demo.
 Calls FastAPI backend at http://localhost:8000/chat
 Run with: streamlit run streamlit_app.py
 """
+import sys
+import os
+# Add parent directory to path for app imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
 from components.seat_map import render_seat_map_html
+from app.utils.prompt_converter import PromptConverter
 
 API_URL = "http://localhost:8000"
 
@@ -124,6 +130,91 @@ with left:
         st.text("Output filtering: Enabled")
     
     # ==========================================================================
+    # PROMPT CONVERTER - Convert plain prompts to Chain of Thought prompts
+    # ==========================================================================
+    with st.expander("🔄 CoT Prompt Converter", expanded=False):
+        st.caption("Converts plain prompts into Chain of Thought prompts with step-by-step reasoning")
+        
+        # Initialize state
+        if "converter_input" not in st.session_state:
+            st.session_state.converter_input = ""
+        if "converter_output" not in st.session_state:
+            st.session_state.converter_output = ""
+        if "converter_thinking" not in st.session_state:
+            st.session_state.converter_thinking = ""
+        
+        # Sample prompts for quick testing
+        st.markdown("**Try a sample:**")
+        sample_prompts = [
+            "Cancel my booking IR-D204",
+            "What is the baggage allowance for international flights?",
+            "Book a flight from NYC to LA for next Friday"
+        ]
+        
+        def set_sample(sample_text):
+            st.session_state.converter_input = sample_text
+            st.session_state.converter_output = ""
+            st.session_state.converter_thinking = ""
+        
+        sample_cols = st.columns(3)
+        for idx, sample in enumerate(sample_prompts):
+            with sample_cols[idx]:
+                st.button(f"💬 Simple Prompt {idx + 1}", key=f"sample_{idx}", 
+                         use_container_width=True, on_click=set_sample, args=(sample,))
+        
+        # Input text area
+        input_prompt = st.text_area(
+            "Plain Prompt",
+            height=80,
+            placeholder="e.g., What is the weather like in Paris?",
+            key="converter_input"
+        )
+        
+        # Model selection and convert button
+        col_model, col_button = st.columns([1, 2])
+        with col_model:
+            use_inference = st.checkbox("Use inference model", value=False, 
+                                        help="Higher quality but slower/costlier")
+        with col_button:
+            convert_clicked = st.button("🔄 Convert to Chain of Thought", use_container_width=True)
+        
+        if convert_clicked:
+            if input_prompt.strip():
+                with st.spinner("Converting..."):
+                    try:
+                        converter = PromptConverter()
+                        converted, thinking = converter.convert_with_reasoning(input_prompt, use_inference_model=use_inference)
+                        st.session_state.converter_output = converted
+                        st.session_state.converter_thinking = thinking
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+            else:
+                st.warning("Please enter a prompt to convert")
+        
+        # Show thinking process if available
+        if st.session_state.converter_thinking:
+            with st.expander("💭 Conversion Reasoning", expanded=False):
+                st.markdown(st.session_state.converter_thinking)
+        
+        # Output text area
+        if st.session_state.converter_output:
+            st.text_area(
+                "Chain of Thought Prompt",
+                value=st.session_state.converter_output,
+                height=200,
+                disabled=True,
+                key="converter_output_area"
+            )
+            
+            # Clear button
+            def clear_converter():
+                st.session_state.converter_input = ""
+                st.session_state.converter_output = ""
+                st.session_state.converter_thinking = ""
+            
+            st.button("🗑️ Clear", key="clear_converter", on_click=clear_converter)
+    
+    # ==========================================================================
     # EVALUATIONS - Run evaluation steps from the dashboard
     # ==========================================================================
     with st.expander("📊 Evaluations", expanded=False):
@@ -182,8 +273,8 @@ with left:
             st.session_state.confirm_delete_testdata = False
         if "confirm_delete_results" not in st.session_state:
             st.session_state.confirm_delete_results = False
-        if "log_to_foundry" not in st.session_state:
-            st.session_state.log_to_foundry = False
+        if "foundry_status" not in st.session_state:
+            st.session_state.foundry_status = None  # None = not tested, dict with success/message
         
         # Use the same Python interpreter that's running Streamlit (venv)
         python_exe = sys.executable
@@ -252,16 +343,17 @@ with left:
                     st.rerun()
         
         # =======================================================================
-        # ROW 2: Log to Foundry checkbox | Status info | | Delete results
+        # ROW 2: Upload to Foundry | Status info | | Delete results
         # =======================================================================
         col5, col6, col7, col8 = st.columns([3, 3, 3, 1])
         
         with col5:
-            st.session_state.log_to_foundry = st.checkbox(
-                "☁️ Log to Foundry", 
-                value=st.session_state.log_to_foundry,
-                help="Upload evaluation results to Azure AI Foundry portal"
-            )
+            if st.button("☁️ Upload to Foundry", use_container_width=True,
+                        help="Re-run evaluation and upload to Azure AI Foundry",
+                        disabled=st.session_state.eval_running or not test_data_exists):
+                st.session_state.eval_command = "upload_foundry"
+                st.session_state.eval_running = True
+                st.rerun()
         
         with col6:
             if test_data_exists:
@@ -340,15 +432,9 @@ with left:
                 st.rerun()
             
             elif cmd == "eval":
-                # Check if logging to Foundry
-                log_foundry = st.session_state.log_to_foundry
-                spinner_msg = "Running evaluation + uploading to Foundry..." if log_foundry else "Running evaluation (GPT judge scoring)..."
-                
-                with st.spinner(spinner_msg):
+                with st.spinner("Running evaluation (GPT judge scoring)..."):
                     try:
                         eval_cmd = [python_exe, "-m", "evaluations.run_eval", "--data", "evaluations/data/test_data.jsonl"]
-                        if log_foundry:
-                            eval_cmd.append("--log-to-foundry")
                         
                         # Set PYTHONIOENCODING to handle Unicode from Azure SDK
                         env = os.environ.copy()
@@ -359,12 +445,11 @@ with left:
                             cwd=src2_dir,
                             capture_output=True,
                             text=True,
-                            timeout=240 if log_foundry else 180,
+                            timeout=180,
                             env=env
                         )
-                        title = "Run Evaluation + Foundry" if log_foundry else "Run Evaluation (Local)"
                         st.session_state.eval_output = {
-                            "title": title,
+                            "title": "Run Evaluation (Local)",
                             "success": result.returncode == 0,
                             "stdout": result.stdout,
                             "stderr": result.stderr
@@ -373,6 +458,35 @@ with left:
                         st.session_state.eval_output = {"title": "Run Evaluation", "success": False, "stderr": "Timeout"}
                     except Exception as e:
                         st.session_state.eval_output = {"title": "Run Evaluation", "success": False, "stderr": str(e)}
+                st.session_state.eval_running = False
+                st.rerun()
+            
+            elif cmd == "upload_foundry":
+                with st.spinner("Running evaluation + uploading to Foundry..."):
+                    try:
+                        eval_cmd = [python_exe, "-m", "evaluations.run_eval", "--data", "evaluations/data/test_data.jsonl", "--log-to-foundry"]
+                        
+                        env = os.environ.copy()
+                        env["PYTHONIOENCODING"] = "utf-8"
+                        
+                        result = subprocess.run(
+                            eval_cmd,
+                            cwd=src2_dir,
+                            capture_output=True,
+                            text=True,
+                            timeout=240,
+                            env=env
+                        )
+                        st.session_state.eval_output = {
+                            "title": "Upload to Foundry",
+                            "success": result.returncode == 0,
+                            "stdout": result.stdout,
+                            "stderr": result.stderr
+                        }
+                    except subprocess.TimeoutExpired:
+                        st.session_state.eval_output = {"title": "Upload to Foundry", "success": False, "stderr": "Timeout after 240s"}
+                    except Exception as e:
+                        st.session_state.eval_output = {"title": "Upload to Foundry", "success": False, "stderr": str(e)}
                 st.session_state.eval_running = False
                 st.rerun()
             
@@ -443,6 +557,44 @@ with left:
             if st.button("Clear Output", use_container_width=False):
                 st.session_state.eval_output = None
                 st.rerun()
+        
+        # =======================================================================
+        # FOUNDRY CONNECTIVITY TEST (centered link at bottom)
+        # =======================================================================
+        st.divider()
+        _, center_col, _ = st.columns([1, 2, 1])
+        with center_col:
+            if st.button("🔗 Test Foundry Connection", key="test_foundry", use_container_width=True):
+                try:
+                    from dotenv import load_dotenv
+                    load_dotenv(os.path.join(src2_dir, "..", ".env"))
+                    
+                    endpoint = os.getenv("AZURE_AI_PROJECT_ENDPOINT")
+                    
+                    if not endpoint:
+                        st.session_state.foundry_status = {
+                            "success": False, 
+                            "message": "AZURE_AI_PROJECT_ENDPOINT not set in .env"
+                        }
+                    else:
+                        from azure.identity import DefaultAzureCredential
+                        credential = DefaultAzureCredential()
+                        token = credential.get_token("https://cognitiveservices.azure.com/.default")
+                        st.session_state.foundry_status = {
+                            "success": True,
+                            "message": f"Auth OK: {endpoint[:60]}..."
+                        }
+                except Exception as e:
+                    st.session_state.foundry_status = {"success": False, "message": str(e)[:100]}
+                st.rerun()
+        
+        # Show status if tested
+        if st.session_state.foundry_status:
+            status = st.session_state.foundry_status
+            if status["success"]:
+                st.success(f"✅ {status['message']}")
+            else:
+                st.error(f"❌ {status['message']}")
     
     # Runner Output / API Status
     with st.expander("📡 API Status", expanded=False):

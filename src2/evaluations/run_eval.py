@@ -102,13 +102,16 @@ def run_evaluation(
         azure_ai_project = settings.azure_ai_project
         if not azure_ai_project:
             print("\nWARNING: Foundry logging requested but not configured.")
-            print("Set these environment variables:")
-            print("  - AZURE_SUBSCRIPTION_ID")
-            print("  - AZURE_RESOURCE_GROUP")
-            print("  - AZURE_AI_PROJECT_NAME")
+            print("Set AZURE_AI_PROJECT_ENDPOINT or legacy settings:")
+            print("  - AZURE_AI_PROJECT_ENDPOINT (preferred)")
+            print("  - OR: AZURE_SUBSCRIPTION_ID + AZURE_RESOURCE_GROUP + AZURE_AI_PROJECT_NAME")
             azure_ai_project = None
         else:
-            print(f"Foundry project: {azure_ai_project['project_name']}")
+            # Handle both string (endpoint URL) and dict (legacy) formats
+            if isinstance(azure_ai_project, str):
+                print(f"Foundry endpoint: {azure_ai_project}")
+            else:
+                print(f"Foundry project: {azure_ai_project['project_name']}")
     
     print("-" * 60)
     print("Initializing evaluators...")
@@ -157,7 +160,10 @@ def run_evaluation(
     print(f"[OK] Results saved to: {output_path}")
     
     if log_to_foundry and azure_ai_project:
-        print(f"[OK] Results logged to Foundry project: {azure_ai_project['project_name']}")
+        if isinstance(azure_ai_project, str):
+            print(f"[OK] Results logged to Foundry: {azure_ai_project}")
+        else:
+            print(f"[OK] Results logged to Foundry project: {azure_ai_project['project_name']}")
         print("  View in portal: https://ai.azure.com -> Evaluation")
     
     return result

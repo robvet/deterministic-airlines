@@ -105,6 +105,13 @@ class Settings(BaseSettings):
     # =========================================================================
     # Azure AI Foundry / Evaluations (optional - for logging evals to portal)
     # =========================================================================
+    # NEW: Foundry endpoint URL (preferred for new Foundry projects)
+    azure_ai_project_endpoint: str | None = Field(
+        default=None,
+        validation_alias="AZURE_AI_PROJECT_ENDPOINT",
+        description="Foundry project endpoint URL (e.g., https://hub.services.ai.azure.com/api/projects/project-name)"
+    )
+    # LEGACY: Individual settings (fallback for older ML workspace style)
     azure_subscription_id: str | None = Field(
         default=None,
         validation_alias="AZURE_SUBSCRIPTION_ID",
@@ -127,11 +134,21 @@ class Settings(BaseSettings):
     )
     
     @property
-    def azure_ai_project(self) -> dict | None:
+    def azure_ai_project(self) -> str | dict | None:
         """
         Returns Foundry project config for azure-ai-evaluation SDK.
-        Returns None if not fully configured.
+        
+        Supports two formats:
+        1. Endpoint URL string (new Foundry style) - preferred
+        2. Dict with subscription/resource_group/project_name (legacy ML style)
+        
+        Returns None if not configured.
         """
+        # Prefer endpoint URL (new Foundry approach)
+        if self.azure_ai_project_endpoint:
+            return self.azure_ai_project_endpoint
+        
+        # Fallback to dict format (legacy ML workspace approach)
         if all([self.azure_subscription_id, self.azure_resource_group, self.azure_ai_project_name]):
             return {
                 "subscription_id": self.azure_subscription_id,
