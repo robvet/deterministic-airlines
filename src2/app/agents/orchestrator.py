@@ -384,12 +384,11 @@ class OrchestratorAgent:
                 reason=entities.get("reason")
             )
         
-        elif intent == "flight_status":
-            return FlightStatusRequest(
-                flight_number=entities.get("flight_number"),
-                confirmation_number=entities.get("confirmation_number")
-            )
-        
+        # TODO: Add flight_status case here
+        # Hint: Return FlightStatusRequest with flight_number and confirmation_number from entities
+        # elif intent == "flight_status":
+        #     return FlightStatusRequest(...)
+
         elif intent == "baggage":
             return BaggageRequest(
                 question=classification.rewritten_prompt,

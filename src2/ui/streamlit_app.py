@@ -81,6 +81,7 @@ st.markdown("""
 
 # Page title
 st.markdown("<div class='title-banner'>✈️ Deterministic Airlines</div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align: center; color: #FFD700; font-size: 0.9em; margin-top: -10px;'>Developer Instance</div>", unsafe_allow_html=True)
 
 # Initialize session state
 if "messages" not in st.session_state:

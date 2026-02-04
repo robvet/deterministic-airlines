@@ -7,6 +7,11 @@ This tool demonstrates:
 3. Returning structured status information
 
 SET BREAKPOINT in execute() to trace the full flow.
+
+WORKSHOP EXERCISE:
+Implement the execute() method to:
+1. Look up the flight/booking in mock data
+2. Build and return a FlightStatusResponse
 """
 from ..models.context import AgentContext
 from ..models.flight_status import FlightStatusRequest, FlightStatusResponse
@@ -64,61 +69,70 @@ class FlightStatusTool:
         
         # =================================================================
         # BREAKPOINT 2: LOOK UP FLIGHT IN MOCK DATA
+        # -----------------------------------------------------------------
+        # TODO: Implement flight lookup
+        #
+        # Available helper functions (from data.booking_data):
+        #   get_itinerary_by_confirmation(confirmation_number) -> dict or None
+        #   get_itinerary_by_flight(flight_number) -> tuple(scenario_key, itinerary) or None
+        #
+        # Itinerary structure:
+        #   itinerary["segments"] = [
+        #       {"flight_number": "PA441", "origin": "CDG", "destination": "JFK", 
+        #        "status": "Delayed 3 hours", "gate": "B7", ...},
+        #       ...
+        #   ]
+        #
+        # Steps:
+        #   1. Try lookup by confirmation_number first (if provided)
+        #   2. If not found, try lookup by flight_number
+        #   3. Find the matching segment in the itinerary
         # =================================================================
         segment = None
         itinerary = None
         scenario_key = None
         
-        # Try confirmation number first
-        if request.confirmation_number:
-            itinerary = get_itinerary_by_confirmation(request.confirmation_number)
-            if itinerary and itinerary.get("segments"):
-                segment = itinerary["segments"][0]  # Get first segment
-                print(f"[FlightStatusTool] Found itinerary by confirmation")
+        # TODO: Look up by confirmation number
+        # if request.confirmation_number:
+        #     ...
         
-        # Try flight number
-        if not segment and request.flight_number:
-            result = get_itinerary_by_flight(request.flight_number)
-            if result:
-                scenario_key, itinerary = result
-                # Find the specific segment
-                for seg in itinerary.get("segments", []):
-                    if seg.get("flight_number", "").upper() == request.flight_number.upper():
-                        segment = seg
-                        break
-                print(f"[FlightStatusTool] Found flight in {scenario_key} itinerary")
+        # TODO: Look up by flight number  
+        # if not segment and request.flight_number:
+        #     ...
         
         # =================================================================
         # BREAKPOINT 3: BUILD STATUS RESPONSE
+        # -----------------------------------------------------------------
+        # TODO: Return appropriate FlightStatusResponse
+        #
+        # If segment NOT found, return:
+        #   FlightStatusResponse(
+        #       found=False,
+        #       message="Flight not found..."
+        #   )
+        #
+        # If segment found, return:
+        #   FlightStatusResponse(
+        #       found=True,
+        #       flight_number=segment.get("flight_number"),
+        #       origin=segment.get("origin"),
+        #       destination=segment.get("destination"),
+        #       status=segment.get("status", "On time"),
+        #       departure_time=segment.get("departure"),
+        #       arrival_time=segment.get("arrival"),
+        #       gate=segment.get("gate"),
+        #       message="..."  # Human-readable status message
+        #   )
+        #
+        # BONUS: Check for connection impacts in disrupted scenarios
         # =================================================================
-        if not segment:
-            print(f"[FlightStatusTool] Flight not found")
-            return FlightStatusResponse(
-                found=False,
-                message=f"Flight {request.flight_number or request.confirmation_number} not found in our system. "
-                        "Please verify the flight number or confirmation code."
-            )
         
-        # Check for connection impact (disrupted scenario)
-        connection_warning = ""
-        if scenario_key == "disrupted" and segment.get("flight_number") == "PA441":
-            connection_warning = " WARNING: This delay will cause a missed connection to NY802. Rebooking is recommended."
-        
-        response = FlightStatusResponse(
-            found=True,
-            flight_number=segment.get("flight_number"),
-            origin=segment.get("origin"),
-            destination=segment.get("destination"),
-            status=segment.get("status", "On time"),
-            departure_time=segment.get("departure"),
-            arrival_time=segment.get("arrival"),
-            gate=segment.get("gate"),
-            message=(
-                f"Flight {segment.get('flight_number')} from {segment.get('origin')} to {segment.get('destination')}: "
-                f"{segment.get('status', 'On time')}. "
-                f"Gate {segment.get('gate', 'TBD')}.{connection_warning}"
-            )
+        # TODO: Replace this placeholder with your implementation
+        return FlightStatusResponse(
+            found=False,
+            message=f"TODO: Implement flight status lookup for {request.flight_number or request.confirmation_number}"
         )
-        
-        print(f"[FlightStatusTool] ✓ Status: {response.status}")
-        return response
+
+##########################################
+# TODO: Register FlightStatusTool in app/api/routes.py
+##########################################
