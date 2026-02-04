@@ -14,6 +14,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 from components.seat_map import render_seat_map_html
 from app.utils.prompt_converter import PromptConverter
+from app.utils.fewshot_converter import FewShotConverter
 
 API_URL = "http://localhost:8000"
 
@@ -86,13 +87,17 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 if "last_response" not in st.session_state:
     st.session_state.last_response = None
+if "bypass_mode" not in st.session_state:
+    st.session_state.bypass_mode = False
+if "pending_input" not in st.session_state:
+    st.session_state.pending_input = ""
 
 
-def call_api(user_input: str) -> dict:
+def call_api(user_input: str, bypass: bool = False) -> dict:
     """Call FastAPI backend."""
     response = requests.post(
         f"{API_URL}/chat",
-        json={"message": user_input, "customer_name": "Workshop Attendee"},
+        json={"message": user_input, "customer_name": "Workshop Attendee", "bypass_classification": bypass},
         timeout=30
     )
     response.raise_for_status()
@@ -115,6 +120,12 @@ with left:
                 "confidence score": resp.get("confidence"),
                 "rewritten prompt": resp.get("rewritten_input"),
             })
+            # Show extracted entities if present
+            entities = resp.get("entities", [])
+            if entities:
+                st.markdown("**🏷️ Extracted Entities:**")
+                for entity in entities:
+                    st.markdown(f"- `{entity.get('type')}`: **{entity.get('value')}**")
         else:
             st.text("No conversation yet")
     
@@ -170,12 +181,13 @@ with left:
             key="converter_input"
         )
         
-        # Model selection and convert button
-        col_model, col_button = st.columns([1, 2])
-        with col_model:
-            use_inference = st.checkbox("Use inference model", value=False, 
-                                        help="Higher quality but slower/costlier")
-        with col_button:
+        # Model selection
+        use_inference = st.checkbox("Use inference model", value=False, 
+                                    help="Higher quality but slower/costlier")
+        
+        # Centered convert button
+        _, cot_center, _ = st.columns([1, 2, 1])
+        with cot_center:
             convert_clicked = st.button("🔄 Convert to Chain of Thought", use_container_width=True)
         
         if convert_clicked:
@@ -206,13 +218,125 @@ with left:
                 key="converter_output_area"
             )
             
-            # Clear button
+            # Action buttons
             def clear_converter():
                 st.session_state.converter_input = ""
                 st.session_state.converter_output = ""
                 st.session_state.converter_thinking = ""
             
-            st.button("🗑️ Clear", key="clear_converter", on_click=clear_converter)
+            def copy_cot_to_chat():
+                st.session_state.pending_input = st.session_state.converter_output
+            
+            btn_col1, btn_col2 = st.columns(2)
+            with btn_col1:
+                st.button("📋 Copy to Chat", key="copy_cot", on_click=copy_cot_to_chat, use_container_width=True)
+            with btn_col2:
+                st.button("🗑️ Clear", key="clear_converter", on_click=clear_converter, use_container_width=True)
+    
+    # ==========================================================================
+    # FEW-SHOT PROMPT CONVERTER - Wrap prompts with examples
+    # ==========================================================================
+    with st.expander("🎯 Few-Shot Prompt Converter", expanded=False):
+        st.caption("Wraps prompts with relevant examples to guide LLM response format and style")
+        
+        # Initialize state
+        if "fewshot_input" not in st.session_state:
+            st.session_state.fewshot_input = ""
+        if "fewshot_output" not in st.session_state:
+            st.session_state.fewshot_output = ""
+        
+        # Sample prompts for quick testing
+        st.markdown("**Try a sample:**")
+        fewshot_samples = [
+            "What's the baggage policy?",
+            "I want to book a flight to Chicago",
+            "My flight was delayed 4 hours"
+        ]
+        
+        def set_fewshot_sample(sample_text):
+            st.session_state.fewshot_input = sample_text
+            st.session_state.fewshot_output = ""
+        
+        fs_cols = st.columns(3)
+        for idx, sample in enumerate(fewshot_samples):
+            with fs_cols[idx]:
+                st.button(f"💬 Sample {idx + 1}", key=f"fewshot_sample_{idx}", 
+                         use_container_width=True, on_click=set_fewshot_sample, args=(sample,))
+        
+        # Input text area
+        fewshot_prompt = st.text_area(
+            "Plain Prompt",
+            height=60,
+            placeholder="e.g., What's the baggage policy?",
+            key="fewshot_input"
+        )
+        
+        # Category selection and convert button
+        col_cat, col_num = st.columns([2, 1])
+        with col_cat:
+            fewshot_converter = FewShotConverter()
+            category = st.selectbox(
+                "Example Category",
+                options=fewshot_converter.get_categories(),
+                index=0,
+                help="Select examples relevant to the query type"
+            )
+        with col_num:
+            num_examples = st.selectbox(
+                "# Examples",
+                options=[1, 2, 3],
+                index=1,
+                help="More examples = stronger guidance but longer prompt"
+            )
+        
+        # Centered convert button
+        _, center_col, _ = st.columns([1, 2, 1])
+        with center_col:
+            fewshot_clicked = st.button("🎯 Convert to Few-Shot", use_container_width=True, key="fewshot_convert")
+        
+        if fewshot_clicked:
+            if fewshot_prompt.strip():
+                converted = fewshot_converter.convert(fewshot_prompt, category=category, num_examples=num_examples)
+                st.session_state.fewshot_output = converted
+            else:
+                st.warning("Please enter a prompt to convert")
+        
+        # Output text area
+        if st.session_state.fewshot_output:
+            st.text_area(
+                "Few-Shot Prompt",
+                value=st.session_state.fewshot_output,
+                height=250,
+                disabled=True,
+                key="fewshot_output_area"
+            )
+            
+            # Action buttons
+            def clear_fewshot():
+                st.session_state.fewshot_input = ""
+                st.session_state.fewshot_output = ""
+            
+            def copy_fewshot_to_chat():
+                st.session_state.pending_input = st.session_state.fewshot_output
+            
+            fs_btn_col1, fs_btn_col2 = st.columns(2)
+            with fs_btn_col1:
+                st.button("📋 Copy to Chat", key="copy_fewshot", on_click=copy_fewshot_to_chat, use_container_width=True)
+            with fs_btn_col2:
+                st.button("🗑️ Clear", key="clear_fewshot", on_click=clear_fewshot, use_container_width=True)
+    
+    # ==========================================================================
+    # ORCHESTRATION TESTING - Testing toggles and options
+    # ==========================================================================
+    with st.expander("🧪 Orchestration Testing", expanded=False):
+        st.caption("Testing options for agent orchestration behavior")
+        
+        # Bypass mode toggle (for demo: shows hallucination without grounding)
+        st.session_state.bypass_mode = st.checkbox(
+            "🔓 Bypass Mode (skip intent classification - demo hallucination)", 
+            value=st.session_state.bypass_mode,
+            help="When enabled, calls LLM directly without routing or grounding data"
+        )
     
     # ==========================================================================
     # EVALUATIONS - Run evaluation steps from the dashboard
@@ -710,30 +834,36 @@ CDG - Paris
 AUS - Austin
 SFO - San Francisco""", language=None)
     
-    # Process pending input from buttons
-    if "pending_input" in st.session_state:
-        pending = st.session_state.pending_input
-        del st.session_state.pending_input
-        st.session_state.messages.append({"role": "user", "content": pending})
-        with st.spinner("Thinking..."):
-            try:
-                response = call_api(pending)
-                st.session_state.last_response = response
-                st.session_state.messages.append({"role": "assistant", "content": response["answer"]})
-            except Exception as e:
-                st.session_state.messages.append({"role": "assistant", "content": f"Error: {e}"})
+    # Process pending input from suggestion buttons or copy - populate input area (don't auto-run)
+    if st.session_state.pending_input:
+        st.session_state.chat_text_area = st.session_state.pending_input
+        st.session_state.pending_input = ""
         st.rerun()
     
-    # Chat input with sample hint
-    if prompt := st.chat_input("Try: 'What is the baggage policy?' or 'Book flight DA100'"):
-        st.session_state.messages.append({"role": "user", "content": prompt})
+    # Chat input area (manual submit, preserves prompt after run)
+    prompt = st.text_area(
+        "Your message",
+        height=200,
+        placeholder="Try: 'What is the baggage policy?' or 'Book flight DA100'",
+        key="chat_text_area",
+        label_visibility="collapsed"
+    )
+    
+    # Submit button
+    _, submit_col, _ = st.columns([1, 2, 1])
+    with submit_col:
+        submit_clicked = st.button("📤 Send Message", use_container_width=True, type="primary")
+    
+    if submit_clicked and prompt.strip():
+        st.session_state.messages.append({"role": "user", "content": prompt.strip()})
         
         with st.spinner("Thinking..."):
             try:
-                response = call_api(prompt)
+                response = call_api(prompt.strip(), bypass=st.session_state.bypass_mode)
                 st.session_state.last_response = response
                 st.session_state.messages.append({"role": "assistant", "content": response["answer"]})
             except Exception as e:
                 st.session_state.messages.append({"role": "assistant", "content": f"Error: {e}"})
         
+        # Keep prompt in input area (don't clear)
         st.rerun()

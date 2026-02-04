@@ -9,6 +9,12 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+class ExtractedEntity(BaseModel):
+    """An entity extracted during intent classification."""
+    type: str = Field(description="Entity type: destination, date, flight_number, topic, etc.")
+    value: str = Field(description="The extracted value")
+
+
 class AgentResponse(BaseModel):
     """
     Final response from the OrchestratorAgent.
@@ -25,3 +31,6 @@ class AgentResponse(BaseModel):
     # Original vs rewritten (for debugging/logging)
     original_input: str = Field(description="The raw user input")
     rewritten_input: str = Field(description="The cleaned/rewritten prompt")
+    
+    # Extracted entities from NER (for debugging/visibility)
+    entities: list[ExtractedEntity] = Field(default_factory=list, description="Entities extracted during classification")

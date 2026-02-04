@@ -30,6 +30,7 @@ class ChatRequest(BaseModel):
     """Incoming chat message."""
     message: str = Field(..., min_length=1, description="User message")
     customer_name: str = Field(default="Guest", description="Customer name for context")
+    bypass_classification: bool = Field(default=False, description="Skip intent classification, call LLM directly")
 
 
 class ChatResponse(BaseModel):
@@ -38,6 +39,7 @@ class ChatResponse(BaseModel):
     routed_to: str
     confidence: float
     rewritten_input: str
+    entities: list[dict] = []
 
 
 # Module-level singleton (created once on first request)
@@ -146,13 +148,14 @@ async def chat(
     context.turn_count += 1
     
     # Call orchestrator
-    response = orchestrator.handle(request.message, context)
+    response = orchestrator.handle(request.message, context, bypass_classification=request.bypass_classification)
     
     return ChatResponse(
         answer=response.answer,
         routed_to=response.routed_to,
         confidence=response.confidence,
-        rewritten_input=response.rewritten_input
+        rewritten_input=response.rewritten_input,
+        entities=[{"type": e.type, "value": e.value} for e in response.entities]
     )
 
 

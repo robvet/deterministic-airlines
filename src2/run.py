@@ -20,9 +20,12 @@ Usage:
 import sys
 import atexit
 import signal
+from pathlib import Path
 
 from dotenv import load_dotenv
-load_dotenv()  # Load .env before any other imports
+# Load .env from project root (parent of src2/)
+PROJECT_ROOT = Path(__file__).parent.parent
+load_dotenv(PROJECT_ROOT / ".env")
 
 from app.config.settings import settings
 from app.utils.port_cleanup import PortCleanup

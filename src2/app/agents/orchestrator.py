@@ -69,7 +69,8 @@ class OrchestratorAgent:
     def handle(
         self, 
         user_input: str, 
-        context: AgentContext
+        context: AgentContext,
+        bypass_classification: bool = False
     ) -> AgentResponse:
         """
         Handle a user request end-to-end.
@@ -77,6 +78,7 @@ class OrchestratorAgent:
         Args:
             user_input: The raw user message
             context: Conversation context (customer info, turn count, etc.)
+            bypass_classification: If True, skip routing and call LLM directly (for demo)
         
         Returns:
             AgentResponse with the final answer and metadata
@@ -84,6 +86,25 @@ class OrchestratorAgent:
         DEBUGGING: This is the main entry point - set breakpoint here.
         """
         print(f"\n[Orchestrator] Received: {user_input}")
+        
+        # =================================================================
+        # BYPASS MODE: Skip classification, call LLM directly (for demo)
+        # Shows what happens without deterministic routing - hallucination
+        # =================================================================
+        if bypass_classification:
+            print(f"[Orchestrator] BYPASS MODE - calling LLM directly, no grounding")
+            raw_response = self._llm.complete(
+                system_prompt="You are a helpful customer service agent for Deterministic Airlines. Answer the customer's question to the best of your ability.",
+                user_message=user_input
+            )
+            return AgentResponse(
+                answer=raw_response,
+                routed_to="bypass",
+                confidence=0.0,
+                original_input=user_input,
+                rewritten_input=user_input,
+                entities=[]
+            )
         
         # =================================================================
         # STEP 1: CLASSIFY INTENT
@@ -229,7 +250,8 @@ class OrchestratorAgent:
             routed_to=classification.intent,
             confidence=classification.confidence,
             original_input=original_input,
-            rewritten_input=classification.rewritten_prompt
+            rewritten_input=classification.rewritten_prompt,
+            entities=[{"type": e.type, "value": e.value} for e in classification.entities]
         )
         print(f"[Orchestrator] ✓ Built AgentResponse, returning to user")
         
@@ -260,7 +282,8 @@ class OrchestratorAgent:
             routed_to="clarification",
             confidence=classification.confidence,
             original_input=original_input,
-            rewritten_input=classification.rewritten_prompt
+            rewritten_input=classification.rewritten_prompt,
+            entities=[{"type": e.type, "value": e.value} for e in classification.entities]
         )
     
     def _handle_fallback(
@@ -283,7 +306,8 @@ class OrchestratorAgent:
             routed_to="fallback",
             confidence=classification.confidence,
             original_input=original_input,
-            rewritten_input=classification.rewritten_prompt
+            rewritten_input=classification.rewritten_prompt,
+            entities=[{"type": e.type, "value": e.value} for e in classification.entities]
         )
     
     def _save_turn(
