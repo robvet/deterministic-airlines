@@ -19,6 +19,11 @@ Get-Process -Id (Get-NetTCPConnection -LocalPort 8000).OwningProcess | Stop-Proc
 az login
 az account show
 
+### Merge to branches from main
+git checkout deterministic-airline-developer-v1
+git merge main
+git push
+
 
 
 # Install packages

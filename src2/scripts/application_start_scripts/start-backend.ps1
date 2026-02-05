@@ -18,5 +18,10 @@ if (-not $env:VIRTUAL_ENV) {
 Write-Host "Starting FastAPI backend on http://localhost:8000 ..." -ForegroundColor Cyan
 Set-Location $src2Dir
 
+# Kill any existing process on port 8000
+Write-Host "Stopping any existing backend server..." -ForegroundColor Yellow
+Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+Start-Sleep -Seconds 1
+
 # Run the FastAPI server
 python run.py
