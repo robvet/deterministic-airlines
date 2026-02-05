@@ -33,22 +33,32 @@ class LLMService:
         self._deployment = config.azure_deployment
         self._classifier_deployment = config.classifier_deployment
         
-        # Setup Azure AD token provider for Entra ID authentication
-        token_provider = get_bearer_token_provider(
-            DefaultAzureCredential(), 
-            "https://cognitiveservices.azure.com/.default"
-        )
-        
-        # Create the Azure OpenAI client
-        self._client = AzureOpenAI(
-            api_version=config.azure_api_version,
-            azure_endpoint=config.azure_endpoint,
-            azure_ad_token_provider=token_provider,
-        )
+        # Choose authentication method: API key or DefaultAzureCredential
+        if config.azure_api_key:
+            # Use API key authentication
+            self._client = AzureOpenAI(
+                api_version=config.azure_api_version,
+                azure_endpoint=config.azure_endpoint,
+                api_key=config.azure_api_key,
+            )
+            auth_method = "API Key"
+        else:
+            # Use DefaultAzureCredential (Entra ID) authentication
+            token_provider = get_bearer_token_provider(
+                DefaultAzureCredential(), 
+                "https://cognitiveservices.azure.com/.default"
+            )
+            self._client = AzureOpenAI(
+                api_version=config.azure_api_version,
+                azure_endpoint=config.azure_endpoint,
+                azure_ad_token_provider=token_provider,
+            )
+            auth_method = "DefaultAzureCredential (Entra ID)"
         
         print(f"[LLMService] Initialized")
         print(f"[LLMService]   Execution model: {self._deployment}")
         print(f"[LLMService]   Classifier model: {self._classifier_deployment}")
+        print(f"[LLMService]   Auth: {auth_method}")
     
     def complete(
         self,
