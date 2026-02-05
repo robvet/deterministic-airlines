@@ -27,8 +27,13 @@ from dotenv import load_dotenv
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 ENV_FILE = PROJECT_ROOT / ".env"
 
+# Clear any cached API key before loading .env
+# This ensures commented-out or missing keys don't persist from previous terminal sessions
+if "AZURE_OPENAI_ENDPOINT_KEY" in os.environ:
+    del os.environ["AZURE_OPENAI_ENDPOINT_KEY"]
+
 if ENV_FILE.exists():
-    load_dotenv(ENV_FILE)
+    load_dotenv(ENV_FILE, override=True)
 
 
 class LLMConfig:
@@ -61,8 +66,12 @@ class LLMConfig:
             "2024-12-01-preview"
         )
         
-        # Optional API key (if not using DefaultAzureCredential)
-        self.azure_api_key: str | None = os.getenv("AZURE_OPENAI_API_KEY")
+        # API key authentication
+        # Use key auth ONLY if AZURE_OPENAI_ENDPOINT_KEY has an actual value
+        # Empty or missing = DefaultAzureCredential
+        raw_key = os.getenv("AZURE_OPENAI_ENDPOINT_KEY", "").strip()
+        self.azure_api_key: str | None = raw_key if raw_key else None
+        print(f"[LLMConfig] AZURE_OPENAI_ENDPOINT_KEY raw='{os.getenv('AZURE_OPENAI_ENDPOINT_KEY', '<not set>')}' -> using {'API Key' if self.azure_api_key else 'DefaultAzureCredential'}")
         
         print(f"[LLMConfig] Initialized")
     
@@ -85,4 +94,5 @@ class LLMConfig:
         print(f"[LLMConfig]   Endpoint: {self.azure_endpoint}")
         print(f"[LLMConfig]   Execution model: {self.azure_deployment}")
         print(f"[LLMConfig]   Classifier model: {self.classifier_deployment}")
-        print(f"[LLMConfig]   Auth: DefaultAzureCredential (Entra ID)")
+        auth_method = "API Key" if self.azure_api_key else "DefaultAzureCredential (Entra ID)"
+        print(f"[LLMConfig]   Auth: {auth_method}")

@@ -750,9 +750,9 @@ with right:
                 st.write(msg["content"])
     
     # ==========================================================================
-    # SUGGESTIONS - Collapsible panel with prompt buttons (expanded by default)
+    # SUGGESTIONS - Collapsible panel with prompt buttons (collapsed by default)
     # ==========================================================================
-    with st.expander("💡 Suggestions", expanded=True):
+    with st.expander("💡 Suggestions", expanded=False):
         # Row 1: FAQ & Baggage
         col1, col2, col3 = st.columns([1, 1, 1])
         with col1:
