@@ -78,11 +78,9 @@ def get_orchestrator() -> OrchestratorAgent:
             description="Cancels an existing flight booking and processes refunds",
             tool_class=CancelFlightTool
         )
-        registry.register(
-            name="flight_status",
-            description="Checks the status of a flight including delays, cancellations, and gate information",
-            tool_class=FlightStatusTool
-        )
+        # registry.register(
+        #    # ToDo Register Flight Status tool 
+        # )
         registry.register(
             name="baggage",
             description="Handles baggage inquiries including allowance, fees, and lost bag claims",

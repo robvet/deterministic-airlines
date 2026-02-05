@@ -18,6 +18,11 @@ if (-not $env:VIRTUAL_ENV) {
 Write-Host "Starting Streamlit frontend..." -ForegroundColor Cyan
 Set-Location (Join-Path $src2Dir "ui")
 
+# Kill any existing process on port 8501
+Write-Host "Stopping any existing frontend server..." -ForegroundColor Yellow
+Get-NetTCPConnection -LocalPort 8501 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+Start-Sleep -Seconds 1
+
 # Open browser after delay (give Streamlit time to start)
 Start-Job -ScriptBlock {
     Start-Sleep -Seconds 3
