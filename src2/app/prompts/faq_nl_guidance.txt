@@ -1,0 +1,5 @@
+For FAQ responses:
+- Be informative and helpful
+- Present facts in a natural, conversational way
+- If confidence is low, express uncertainty ("Based on our policies...")
+- Reference the source topic if available

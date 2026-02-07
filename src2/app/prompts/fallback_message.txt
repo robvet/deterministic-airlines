@@ -1,0 +1,18 @@
+# =============================================================================
+# FALLBACK MESSAGE TEMPLATE
+# =============================================================================
+# Used when confidence is very low (< clarify threshold) or intent unknown.
+# The agent cannot confidently route to any tool - asks user to rephrase.
+#
+# PLACEHOLDERS:
+#   {available_capabilities} - List of things the agent CAN help with
+#   {confidence} - The confidence score that triggered fallback
+#   {detected_intent} - What intent was detected (may be wrong)
+# =============================================================================
+
+I'm sorry, I'm not sure how to help with that.
+
+I can help you with questions about:
+{available_capabilities}
+
+Could you try rephrasing your question?

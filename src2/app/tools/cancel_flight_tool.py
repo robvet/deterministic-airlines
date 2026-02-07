@@ -1,11 +1,20 @@
 """
 Cancel Flight Tool - Handles flight cancellations.
 
+=============================================================================
+STRUCTURED DATA OUTPUT (NO NATURAL LANGUAGE)
+=============================================================================
+
 This tool demonstrates:
 1. Looking up existing bookings (grounding data)
 2. Validating the booking exists
 3. Simulating a cancellation operation
 4. Returning structured response with refund info
+
+ARCHITECTURAL PATTERN:
+  - Tool returns STRUCTURED DATA (cancellation facts, reasoning)
+  - Orchestrator generates NATURAL LANGUAGE from structured data
+  - Single point of NL generation for consistency and control
 
 SET BREAKPOINT in execute() to trace the full flow.
 """
@@ -22,6 +31,15 @@ class CancelFlightTool:
     
     Validates the booking exists before processing cancellation.
     """
+    
+    def build_request(self, classification) -> CancelFlightRequest:
+        """Build CancelFlightRequest from classification result."""
+        entities = {e.type: e.value for e in classification.entities}
+        return CancelFlightRequest(
+            confirmation_number=entities.get("confirmation_number"),
+            flight_number=entities.get("flight_number"),
+            reason=entities.get("reason")
+        )
     
     def __init__(self, llm_service: LLMService, template_service: PromptTemplateService):
         """
@@ -98,10 +116,12 @@ class CancelFlightTool:
             print(f"[CancelFlightTool] Booking not found")
             return CancelFlightResponse(
                 success=False,
-                message=(
-                    f"Could not find booking with confirmation '{request.confirmation_number}' "
-                    f"or flight '{request.flight_number}'. Please verify your booking details."
-                )
+                cancellation_facts=[
+                    f"Booking not found",
+                    f"Searched confirmation: {request.confirmation_number or 'not provided'}",
+                    f"Searched flight: {request.flight_number or 'not provided'}"
+                ],
+                reasoning="Could not locate booking in system - verify confirmation number or flight number"
             )
         
         print(f"[CancelFlightTool] Found booking: {confirmation}")
@@ -123,20 +143,27 @@ class CancelFlightTool:
         refund_amount = 250.00  # Mock refund
         
         # =================================================================
-        # BREAKPOINT 5: VALIDATE AND RETURN RESPONSE
+        # BREAKPOINT 5: BUILD STRUCTURED RESPONSE
+        # -----------------------------------------------------------------
+        # Returns STRUCTURED DATA, not natural language.
+        # Orchestrator will generate NL from these facts.
         # =================================================================
+        cancellation_facts = [
+            f"Booking cancelled: {confirmation}",
+            f"Passenger: {itinerary.get('passenger_name')}",
+            f"Refund amount: ${refund_amount:.2f}",
+            "Refund timeline: 5-7 business days to original payment method"
+        ]
+        
         response = CancelFlightResponse(
             success=True,
+            cancellation_facts=cancellation_facts,
+            reasoning=f"Successfully cancelled booking {confirmation} and initiated refund",
             confirmation_number=confirmation,
-            refund_amount=refund_amount,
-            message=(
-                f"Successfully cancelled booking {confirmation} for {itinerary.get('passenger_name')}. "
-                f"A refund of ${refund_amount:.2f} will be processed to your original payment method "
-                f"within 5-7 business days."
-            )
+            refund_amount=refund_amount
         )
         
         assert isinstance(response, CancelFlightResponse)
-        print(f"[CancelFlightTool] ✓ Cancellation complete: {confirmation}, Refund: ${refund_amount}")
+        print(f"[CancelFlightTool] ✓ Cancellation complete: {confirmation}, facts: {len(cancellation_facts)}")
         
         return response

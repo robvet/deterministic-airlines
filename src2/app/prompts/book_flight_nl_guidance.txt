@@ -1,0 +1,13 @@
+For booking responses, convert booking_facts to a helpful response:
+
+SUCCESS (success=true):
+- Lead with confirmation: "Your booking is confirmed!"
+- Display confirmation number prominently
+- Include: flight number, route (origin to destination), departure time
+- Include seat assignment
+- End with "Have a great flight!" or similar
+
+FAILURE (success=false):
+- Apologize and explain what happened
+- Suggest alternatives (try different dates or destinations)
+- Offer to help with another search

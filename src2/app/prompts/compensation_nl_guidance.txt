@@ -1,0 +1,23 @@
+For compensation responses, convert compensation_facts to a helpful response:
+
+SEVERE DISRUPTION (missed connection, cancellation):
+- Lead with empathy for the inconvenience
+- Display case ID prominently
+- List each voucher clearly with amounts
+- Include next_steps as numbered list
+- Mention keeping receipts for additional expenses
+
+SIGNIFICANT DISRUPTION (long delay):
+- Acknowledge the delay with empathy
+- Display case ID and meal credit
+- Explain where vouchers can be used
+
+MINOR DISRUPTION:
+- Confirm concern is documented
+- Provide case ID for reference
+- Mention 24-hour follow-up
+
+ALWAYS:
+- Be empathetic about the disruption
+- Display total compensation value as currency
+- Include case ID for tracking

@@ -5,7 +5,7 @@ This is the main entry point for the workshop demo.
 All dependencies are wired up explicitly here - no hidden magic.
 
 TO DEBUG:
-1. Set a breakpoint on line "response = orchestrator.handle(...)"
+1. Set a breakpoint on line "response = orchestrator.process_request(...)"
 2. Run with debugger (F5 in VS Code)
 3. Step into (F11) to trace the full flow
 
@@ -121,7 +121,7 @@ def main():
         context.turn_count += 1
         
         # SET BREAKPOINT HERE - Step into (F11) to trace the full flow
-        response = orchestrator.handle(user_input, context)
+        response = orchestrator.process_request(user_input, context)
         
         print(f"\nAgent: {response.answer}")
         print(f"       [routed: {response.routed_to}, confidence: {response.confidence:.2f}]")

@@ -38,6 +38,18 @@ class SeatTool:
     special needs with priority seating.
     """
     
+    def build_request(self, classification) -> SeatRequest:
+        """Build SeatRequest from classification result."""
+        entities = {e.type: e.value for e in classification.entities}
+        return SeatRequest(
+            question=classification.rewritten_prompt,
+            confirmation_number=entities.get("confirmation_number"),
+            flight_number=entities.get("flight_number"),
+            requested_seat=entities.get("seat_number"),
+            preference=entities.get("preference"),
+            special_needs=entities.get("special_needs")
+        )
+    
     def __init__(self, llm_service: LLMService, template_service: PromptTemplateService):
         """
         Initialize with required services.
@@ -150,33 +162,36 @@ class SeatTool:
         if not selected_seat:
             return SeatResponse(
                 success=False,
-                message="Unable to find an available seat matching your preferences. "
-                        "Please contact customer service for assistance."
+                seat_facts=["No available seats matching preferences"],
+                reasoning="All preferred seat types were taken. Customer service assistance needed."
             )
         
-        # Build success message
+        # Build structured facts based on scenario
+        seat_facts = [f"Assigned seat: {selected_seat}"]
+        
         if special_service_noted:
-            message = (
-                f"Special service seat {selected_seat} has been assigned. "
-                f"Your special needs request has been noted on the booking. "
-                "A crew member will assist you during boarding."
-            )
+            seat_facts.append("Special service request noted on booking")
+            seat_facts.append("Crew member will assist during boarding")
+            reasoning = f"Assigned front row seat {selected_seat} for special needs priority"
         elif previous_seat:
-            message = (
-                f"Your seat has been changed from {previous_seat} to {selected_seat}. "
-                "Your boarding pass will be updated."
-            )
+            seat_facts.insert(0, f"Previous seat: {previous_seat}")
+            seat_facts.append("Boarding pass will be updated")
+            reasoning = f"Changed seat from {previous_seat} to {selected_seat}"
         else:
-            message = (
-                f"Seat {selected_seat} has been assigned to your booking. "
-                "Check your boarding pass for details."
-            )
+            seat_facts.append("Boarding pass updated with seat assignment")
+            if request.preference:
+                reasoning = f"Assigned seat {selected_seat} based on '{request.preference}' preference"
+            elif request.requested_seat:
+                reasoning = f"Assigned specifically requested seat {selected_seat}"
+            else:
+                reasoning = f"Assigned next available seat {selected_seat}"
         
         response = SeatResponse(
             success=True,
             seat_number=selected_seat,
             previous_seat=previous_seat,
-            message=message,
+            seat_facts=seat_facts,
+            reasoning=reasoning,
             special_service_noted=special_service_noted
         )
         

@@ -1,12 +1,22 @@
 """
 Booking Models - Request/Response schemas for booking operations.
 
+=============================================================================
+STRUCTURED DATA OUTPUT (NO NATURAL LANGUAGE)
+=============================================================================
+
 These Pydantic models enforce structure at tool boundaries:
 - Input validation (what the tool receives)
 - Output validation (what the tool returns)
+
+ARCHITECTURAL PATTERN:
+  - Tool returns STRUCTURED DATA (facts, reasoning)
+  - Orchestrator generates NATURAL LANGUAGE from structured data
+  - Single point of NL generation for consistency and control
+=============================================================================
 """
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List
 
 
 # =============================================================================
@@ -43,12 +53,19 @@ class BookFlightRequest(BaseModel):
 
 class BookFlightResponse(BaseModel):
     """
-    Response after booking a flight.
+    Structured output from the BookFlight tool.
     
-    The tool returns this structured response.
+    NOTE: No 'message' field. The Orchestrator generates natural language
+    from the structured booking_facts. This ensures consistent NL generation.
     """
     success: bool = Field(
         description="Whether the booking was successful"
+    )
+    booking_facts: List[str] = Field(
+        description="List of booking details (flight, route, time, confirmation, seat)"
+    )
+    reasoning: str = Field(
+        description="Brief explanation of the booking result"
     )
     confirmation_number: Optional[str] = Field(
         default=None,
@@ -57,9 +74,6 @@ class BookFlightResponse(BaseModel):
     flight_number: Optional[str] = Field(
         default=None,
         description="The booked flight number"
-    )
-    message: str = Field(
-        description="Human-readable result message"
     )
     seat_assignment: Optional[str] = Field(
         default=None,
@@ -93,10 +107,19 @@ class CancelFlightRequest(BaseModel):
 
 class CancelFlightResponse(BaseModel):
     """
-    Response after cancelling a flight.
+    Structured output from the CancelFlight tool.
+    
+    NOTE: No 'message' field. The Orchestrator generates natural language
+    from the structured cancellation_facts. This ensures consistent NL generation.
     """
     success: bool = Field(
         description="Whether the cancellation was successful"
+    )
+    cancellation_facts: List[str] = Field(
+        description="List of cancellation details (confirmation, passenger, refund)"
+    )
+    reasoning: str = Field(
+        description="Brief explanation of the cancellation result"
     )
     confirmation_number: Optional[str] = Field(
         default=None,
@@ -105,7 +128,4 @@ class CancelFlightResponse(BaseModel):
     refund_amount: Optional[float] = Field(
         default=None,
         description="Refund amount if applicable"
-    )
-    message: str = Field(
-        description="Human-readable result message"
     )

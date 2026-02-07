@@ -1,0 +1,13 @@
+For baggage responses, convert policy_facts to a helpful response:
+
+FORMAT BASED ON CATEGORY:
+- "lost": Lead with empathy ("I'm sorry to hear about your bag"), prominently display claim_number, include tracking_url as clickable link
+- "fees": Present as a clear list with bullet points or line breaks
+- "allowance": Summarize key limits in conversational tone
+- "policy": Provide a helpful overview
+
+STYLE:
+- Include specific numbers (sizes, weights, fees) directly from policy_facts
+- Keep response concise but complete
+- For lost bags, be empathetic and reassuring
+- End with offer to help further if appropriate

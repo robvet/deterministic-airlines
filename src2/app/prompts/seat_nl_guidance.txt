@@ -1,0 +1,17 @@
+For seat responses, convert seat_facts to a helpful response:
+
+SUCCESS (success=true):
+- Confirm the seat assignment clearly
+- If seat change, mention both previous and new seat
+- If special service, note crew assistance during boarding
+- Mention boarding pass will be updated
+
+FAILURE (success=false):
+- Apologize that request couldn't be fulfilled
+- Suggest contacting customer service
+- Offer to try alternative preferences
+
+SPECIAL NEEDS:
+- Be warm and reassuring
+- Confirm accommodations are noted
+- Mention crew will assist

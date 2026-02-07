@@ -18,6 +18,23 @@ from app.utils.fewshot_converter import FewShotConverter
 
 API_URL = "http://localhost:8000"
 
+# Path to architecture diagram (relative to workspace root)
+ARCHITECTURE_DIAGRAM_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "docs", "architecture", "architecture-diagram.png"
+)
+
+
+@st.dialog("System Architecture", width="large")
+def show_architecture_dialog():
+    """Display the system architecture diagram in a modal dialog."""
+    if os.path.exists(ARCHITECTURE_DIAGRAM_PATH):
+        st.image(ARCHITECTURE_DIAGRAM_PATH, use_container_width=True)
+        st.caption("Deterministic Airlines - Agent Architecture")
+    else:
+        st.error(f"Architecture diagram not found at: {ARCHITECTURE_DIAGRAM_PATH}")
+
+
 st.set_page_config(page_title="Deterministic Airlines", layout="wide")
 
 # Custom CSS for styling
@@ -76,6 +93,17 @@ st.markdown("""
     [data-testid="stBottom"] > div {
         background-color: transparent !important;
     }
+    /* Larger icons for vertical button bar */
+    [data-testid="stButton"] button p {
+        font-size: 1.3rem;
+    }
+    /* Make checkboxes more visible on dark background */
+    [data-testid="stCheckbox"] {
+        background-color: #2d3748;
+        padding: 8px 12px;
+        border-radius: 6px;
+        border: 1px solid #4a5568;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -94,11 +122,24 @@ if "pending_input" not in st.session_state:
 
 
 def call_api(user_input: str, bypass: bool = False) -> dict:
-    """Call FastAPI backend."""
+    """Call FastAPI backend with optional threshold overrides."""
+    # Build request with threshold overrides from config panel
+    request_body = {
+        "message": user_input, 
+        "customer_name": "Workshop Attendee", 
+        "bypass_classification": bypass
+    }
+    
+    # Include threshold overrides if set
+    if "config_execute_threshold" in st.session_state:
+        request_body["confidence_threshold_execute"] = st.session_state.config_execute_threshold
+    if "config_clarify_threshold" in st.session_state:
+        request_body["confidence_threshold_clarify"] = st.session_state.config_clarify_threshold
+    
     response = requests.post(
         f"{API_URL}/chat",
-        json={"message": user_input, "customer_name": "Workshop Attendee", "bypass_classification": bypass},
-        timeout=30
+        json=request_body,
+        timeout=120
     )
     response.raise_for_status()
     return response.json()
@@ -326,16 +367,97 @@ with left:
                 st.button("🗑️ Clear", key="clear_fewshot", on_click=clear_fewshot, use_container_width=True)
     
     # ==========================================================================
-    # ORCHESTRATION TESTING - Testing toggles and options
+    # ORCHESTRATION SETTINGS - Consolidated orchestrator configuration
     # ==========================================================================
-    with st.expander("🧪 Orchestration Testing", expanded=False):
-        st.caption("Testing options for agent orchestration behavior")
+    with st.expander("🎛️ Orchestration Settings", expanded=False):
+        st.caption("Configure orchestrator behavior: thresholds, bypass mode, and testing options")
+        
+        # ---------------------------------------------------------------------
+        # SECTION 1: Intent Classification Thresholds
+        # ---------------------------------------------------------------------
+        st.markdown("##### 🎯 Intent Classification Thresholds")
+        
+        # Initialize threshold state with defaults
+        if "config_execute_threshold" not in st.session_state:
+            st.session_state.config_execute_threshold = 0.7
+        if "config_clarify_threshold" not in st.session_state:
+            st.session_state.config_clarify_threshold = 0.4
+        
+        # Sliders for thresholds with detailed tooltips
+        execute_threshold = st.slider(
+            "Execute Threshold",
+            min_value=0.0,
+            max_value=1.0,
+            value=st.session_state.config_execute_threshold,
+            step=0.05,
+            help="EXECUTE: When confidence >= this value, the orchestrator routes directly to the tool and executes. "
+                 "Lower values = more aggressive (may execute wrong tool). "
+                 "Higher values = more conservative (may ask clarification unnecessarily). "
+                 "Default: 0.7",
+            key="slider_execute"
+        )
+        
+        clarify_threshold = st.slider(
+            "Clarify Threshold", 
+            min_value=0.0,
+            max_value=1.0,
+            value=st.session_state.config_clarify_threshold,
+            step=0.05,
+            help="CLARIFY: When confidence is between this and Execute threshold, "
+                 "the orchestrator asks the user to confirm intent before executing. "
+                 "Prevents wrong tool execution when model is uncertain. "
+                 "Default: 0.4",
+            key="slider_clarify"
+        )
+        
+        # Update session state
+        st.session_state.config_execute_threshold = execute_threshold
+        st.session_state.config_clarify_threshold = clarify_threshold
+        
+        # Visual representation of thresholds with behavior tooltips
+        st.markdown("**Routing Zones**")
+        col_zones = st.columns([1, 1, 1])
+        with col_zones[0]:
+            st.markdown(
+                f"🔴 **Fallback**<br/>0.0 - {clarify_threshold:.2f}<br/>"
+                f"<small style='color:gray'>Model too uncertain. Lists available capabilities and asks user to rephrase.</small>",
+                unsafe_allow_html=True
+            )
+        with col_zones[1]:
+            st.markdown(
+                f"🟡 **Clarify**<br/>{clarify_threshold:.2f} - {execute_threshold:.2f}<br/>"
+                f"<small style='color:gray'>Model has an idea but wants confirmation. Asks 'Did you mean...?'</small>",
+                unsafe_allow_html=True
+            )
+        with col_zones[2]:
+            st.markdown(
+                f"🟢 **Execute**<br/>{execute_threshold:.2f} - 1.0<br/>"
+                f"<small style='color:gray'>Model confident. Routes to tool and executes immediately.</small>",
+                unsafe_allow_html=True
+            )
+        
+        # Reset button
+        def reset_thresholds():
+            st.session_state.config_execute_threshold = 0.7
+            st.session_state.config_clarify_threshold = 0.4
+        
+        if st.button("🔄 Reset to Defaults", key="reset_thresholds", use_container_width=True):
+            reset_thresholds()
+            st.rerun()
+        
+        # ---------------------------------------------------------------------
+        # SECTION 2: Testing Options (separated by divider)
+        # ---------------------------------------------------------------------
+        st.markdown("---")  # Blue divider line
+        st.markdown("##### 🧪 Testing Options")
         
         # Bypass mode toggle (for demo: shows hallucination without grounding)
         st.session_state.bypass_mode = st.checkbox(
-            "🔓 Bypass Mode (skip intent classification - demo hallucination)", 
+            "🔓 Bypass Mode (skip intent classification)", 
             value=st.session_state.bypass_mode,
-            help="When enabled, calls LLM directly without routing or grounding data"
+            help="BYPASS: Calls LLM directly without routing or grounding data. "
+                 "Use this to demonstrate hallucination - what happens when the agent "
+                 "doesn't have deterministic routing or grounded data."
         )
     
     # ==========================================================================
@@ -749,9 +871,9 @@ with right:
                 st.write(msg["content"])
     
     # ==========================================================================
-    # SUGGESTIONS - Collapsible panel with prompt buttons (collapsed by default)
+    # PROMPT SUGGESTIONS - Collapsible panel with prompt buttons (collapsed by default)
     # ==========================================================================
-    with st.expander("💡 Suggestions", expanded=False):
+    with st.expander("💡 Prompt Suggestions", expanded=False):
         # Row 1: FAQ & Baggage
         col1, col2, col3 = st.columns([1, 1, 1])
         with col1:
@@ -840,19 +962,25 @@ SFO - San Francisco""", language=None)
         st.session_state.pending_input = ""
         st.rerun()
     
-    # Chat input area (manual submit, preserves prompt after run)
-    prompt = st.text_area(
-        "Your message",
-        height=200,
-        placeholder="Try: 'What is the baggage policy?' or 'Book flight DA100'",
-        key="chat_text_area",
-        label_visibility="collapsed"
-    )
+    # Chat input area with vertical button bar (narrower, centered)
+    input_col, btn_col = st.columns([12, 1], gap="small")
     
-    # Submit button
-    _, submit_col, _ = st.columns([1, 2, 1])
-    with submit_col:
-        submit_clicked = st.button("📤 Send Message", use_container_width=True, type="primary")
+    with input_col:
+        prompt = st.text_area(
+            "Your message",
+            height=200,
+            placeholder="Try: 'What is the baggage policy?' or 'Book flight DA100'",
+            key="chat_text_area",
+            label_visibility="collapsed"
+        )
+    
+    with btn_col:
+        # Add vertical spacing to center buttons with textarea
+        st.markdown("<div style='height: 25px'></div>", unsafe_allow_html=True)
+        submit_clicked = st.button("➤", key="send_btn", type="primary", help="Send message", use_container_width=True)
+        st.button("📄", key="upload_btn", help="Upload image (coming soon)", use_container_width=True)
+        if st.button("📈", key="arch_btn", help="View system architecture diagram", use_container_width=True):
+            show_architecture_dialog()
     
     if submit_clicked and prompt.strip():
         st.session_state.messages.append({"role": "user", "content": prompt.strip()})

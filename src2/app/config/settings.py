@@ -94,6 +94,20 @@ class Settings(BaseSettings):
     server_port: int = Field(default=8000, validation_alias="SERVER_PORT")
     
     # =========================================================================
+    # Orchestrator Confidence Thresholds (tunable via .env or UI)
+    # =========================================================================
+    confidence_threshold_execute: float = Field(
+        default=0.7,
+        validation_alias="CONFIDENCE_THRESHOLD_EXECUTE",
+        description="Above this: execute the tool (default 0.7)"
+    )
+    confidence_threshold_clarify: float = Field(
+        default=0.4,
+        validation_alias="CONFIDENCE_THRESHOLD_CLARIFY",
+        description="Above this but below execute: ask clarification (default 0.4)"
+    )
+    
+    # =========================================================================
     # Development Features (disabled by default for production safety)
     # =========================================================================
     open_browser: bool = Field(

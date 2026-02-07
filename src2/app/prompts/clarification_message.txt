@@ -1,0 +1,14 @@
+# =============================================================================
+# CLARIFICATION MESSAGE TEMPLATE
+# =============================================================================
+# Used when confidence is medium (between clarify and execute thresholds).
+# The agent has some idea but wants to confirm before executing.
+#
+# PLACEHOLDERS:
+#   {detected_intent} - The intent the agent thinks the user wants
+#   {confidence} - The confidence score (for debugging visibility)
+# =============================================================================
+
+I'm not quite sure I understand. Could you rephrase your question?
+
+I think you might be asking about {detected_intent}, but I want to make sure.

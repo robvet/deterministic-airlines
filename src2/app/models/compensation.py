@@ -1,9 +1,19 @@
 """
 Compensation Models - Request/Response schemas for compensation operations.
 
+=============================================================================
+STRUCTURED DATA OUTPUT (NO NATURAL LANGUAGE)
+=============================================================================
+
 These Pydantic models enforce structure at tool boundaries:
 - Input validation (what the tool receives)
 - Output validation (what the tool returns)
+
+ARCHITECTURAL PATTERN:
+  - Tool returns STRUCTURED DATA (compensation facts, reasoning)
+  - Orchestrator generates NATURAL LANGUAGE from structured data
+  - Single point of NL generation for consistency and control
+=============================================================================
 """
 from pydantic import BaseModel, Field
 from typing import Optional, List
@@ -35,6 +45,8 @@ class CompensationRequest(BaseModel):
 class CompensationResponse(BaseModel):
     """
     Response to compensation requests.
+    
+    Returns STRUCTURED DATA - Orchestrator generates natural language.
     """
     case_opened: bool = Field(
         description="Whether a compensation case was opened"
@@ -51,8 +63,11 @@ class CompensationResponse(BaseModel):
         default=None,
         description="Total compensation value in dollars"
     )
-    message: str = Field(
-        description="Human-readable result message"
+    compensation_facts: List[str] = Field(
+        description="Structured facts about the compensation result"
+    )
+    reasoning: str = Field(
+        description="Tool's reasoning about how the compensation was determined"
     )
     next_steps: Optional[str] = Field(
         default=None,

@@ -2,60 +2,66 @@
 FAQ Response Model - Output schema for the FAQ tool.
 
 =============================================================================
-STRUCTURED LLM OUTPUT
+STRUCTURED LLM OUTPUT (NO NATURAL LANGUAGE)
 =============================================================================
 
-This model defines what the LLM MUST return when answering FAQ questions.
-The LLMService parses the LLM's JSON response into this Pydantic model.
+This model defines the STRUCTURED DATA the FAQ tool LLM returns.
+The tool performs grounded reasoning over the knowledge base but returns
+FACTS and REASONING, not natural language. The Orchestrator is responsible
+for converting this structured data into a natural language response.
 
-If the LLM returns malformed JSON or missing fields → ValidationError
-If the LLM returns wrong types (string for confidence) → ValidationError
-
-This is how we make LLM responses DETERMINISTIC and RELIABLE.
+ARCHITECTURAL PATTERN:
+  - Tools return structured data (facts, reasoning, confidence)
+  - Orchestrator generates natural language from structured data
+  - Single point of NL generation for consistency and control
 
 HOW IT WORKS:
-  1. FAQTool sends prompt to LLM with this schema in the instructions
-  2. LLM returns raw JSON text: {"answer": "...", "confidence": 0.9, ...}
-  3. LLMService parses JSON and constructs FAQResponse(...)
-  4. Pydantic validates all fields against constraints
-  5. If valid → returns FAQResponse object
-  6. If invalid → raises ValidationError (caught and handled)
-
-THE LLM SEES THE SCHEMA:
-  When using structured output, the LLM receives the Pydantic schema
-  converted to JSON Schema format. It knows exactly what to return.
+  1. FAQTool sends prompt to LLM with knowledge base
+  2. LLM reasons over knowledge base, identifies relevant facts
+  3. LLM returns structured JSON: {"relevant_facts": [...], "reasoning": "...", ...}
+  4. Pydantic validates the response
+  5. Orchestrator receives structured data, generates NL response
 =============================================================================
 """
 
 from pydantic import BaseModel, Field
+from typing import List
 
 
 class FAQResponse(BaseModel):
     """
-    Output from the FAQ tool.
+    Structured output from the FAQ tool.
     
-    The LLM must return JSON matching this exact structure:
+    The LLM must return JSON matching this structure:
     {
-        "answer": "You can bring one carry-on bag up to 22 pounds...",
+        "relevant_facts": ["Carry-on limit: 22x14x9 inches", "Weight limit: 50 lbs"],
         "confidence": 0.95,
-        "source_topic": "baggage"
+        "source_topic": "baggage",
+        "reasoning": "User asked about luggage size, mapped to carry-on dimensions policy"
     }
     
+    NOTE: No 'answer' field. The Orchestrator generates natural language
+    from these structured facts.
+    
     VALIDATION RULES:
-    - answer: Required, must not be empty (min_length=1)
+    - relevant_facts: Required, list of facts from knowledge base
     - confidence: Required, must be 0.0-1.0 (ge/le constraints)
     - source_topic: Optional, can be null (str | None)
+    - reasoning: Required, explains why these facts are relevant
     """
     
     # ==========================================================================
-    # ANSWER: The response to show the user
+    # RELEVANT_FACTS: Structured data extracted from knowledge base
     # ==========================================================================
-    # This is the main output - the answer to their FAQ question.
-    # The LLM generates this based on the grounding data (FAQ knowledge base).
+    # These are the specific facts from the FAQ knowledge base that answer
+    # the user's question. The LLM identifies and extracts these based on
+    # its grounded reasoning. The Orchestrator will convert these to NL.
+    #
+    # Example: ["Carry-on size: 22x14x9 inches", "One personal item included"]
     # ==========================================================================
-    answer: str = Field(
-        min_length=1,  # Cannot be empty - must provide an answer
-        description="The answer to the user's question"
+    relevant_facts: List[str] = Field(
+        min_length=1,  # Must have at least one fact
+        description="List of relevant facts from the knowledge base that answer the question"
     )
     
     # ==========================================================================

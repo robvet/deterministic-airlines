@@ -23,6 +23,14 @@ class FlightStatusTool:
     current status, delays, and connection impacts.
     """
     
+    def build_request(self, classification) -> FlightStatusRequest:
+        """Build FlightStatusRequest from classification result."""
+        entities = {e.type: e.value for e in classification.entities}
+        return FlightStatusRequest(
+            flight_number=entities.get("flight_number"),
+            confirmation_number=entities.get("confirmation_number")
+        )
+    
     def __init__(self, llm_service: LLMService, template_service: PromptTemplateService):
         """
         Initialize with required services.
@@ -95,14 +103,28 @@ class FlightStatusTool:
             print(f"[FlightStatusTool] Flight not found")
             return FlightStatusResponse(
                 found=False,
-                message=f"Flight {request.flight_number or request.confirmation_number} not found in our system. "
-                        "Please verify the flight number or confirmation code."
+                status_facts=[
+                    f"Flight {request.flight_number or request.confirmation_number} not found in system"
+                ],
+                reasoning="No matching flight found in mock itinerary data"
             )
         
+        # Build status facts
+        status_facts = [
+            f"Flight number: {segment.get('flight_number')}",
+            f"Route: {segment.get('origin')} → {segment.get('destination')}",
+            f"Status: {segment.get('status', 'On time')}",
+            f"Departure: {segment.get('departure', 'TBD')}",
+            f"Arrival: {segment.get('arrival', 'TBD')}",
+            f"Gate: {segment.get('gate', 'TBD')}"
+        ]
+        
         # Check for connection impact (disrupted scenario)
-        connection_warning = ""
+        reasoning = f"Flight found by {'confirmation' if request.confirmation_number else 'flight number'}"
         if scenario_key == "disrupted" and segment.get("flight_number") == "PA441":
-            connection_warning = " WARNING: This delay will cause a missed connection to NY802. Rebooking is recommended."
+            status_facts.append("CONNECTION IMPACT: Delay will cause missed connection to flight NY802")
+            status_facts.append("RECOMMENDATION: Rebooking is recommended")
+            reasoning += ". Detected disrupted scenario - PA441 delay impacts NY802 connection."
         
         response = FlightStatusResponse(
             found=True,
@@ -113,11 +135,8 @@ class FlightStatusTool:
             departure_time=segment.get("departure"),
             arrival_time=segment.get("arrival"),
             gate=segment.get("gate"),
-            message=(
-                f"Flight {segment.get('flight_number')} from {segment.get('origin')} to {segment.get('destination')}: "
-                f"{segment.get('status', 'On time')}. "
-                f"Gate {segment.get('gate', 'TBD')}.{connection_warning}"
-            )
+            status_facts=status_facts,
+            reasoning=reasoning
         )
         
         print(f"[FlightStatusTool] ✓ Status: {response.status}")

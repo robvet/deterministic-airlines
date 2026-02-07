@@ -1,12 +1,22 @@
 """
 Seat Models - Request/Response schemas for seat operations.
 
+=============================================================================
+STRUCTURED DATA OUTPUT (NO NATURAL LANGUAGE)
+=============================================================================
+
 These Pydantic models enforce structure at tool boundaries:
 - Input validation (what the tool receives)
 - Output validation (what the tool returns)
+
+ARCHITECTURAL PATTERN:
+  - Tool returns STRUCTURED DATA (seat facts, reasoning)
+  - Orchestrator generates NATURAL LANGUAGE from structured data
+  - Single point of NL generation for consistency and control
+=============================================================================
 """
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List
 
 
 class SeatRequest(BaseModel):
@@ -43,6 +53,8 @@ class SeatRequest(BaseModel):
 class SeatResponse(BaseModel):
     """
     Response to seat operations.
+    
+    Returns STRUCTURED DATA - Orchestrator generates natural language.
     """
     success: bool = Field(
         description="Whether the seat operation was successful"
@@ -55,8 +67,11 @@ class SeatResponse(BaseModel):
         default=None,
         description="Previous seat if this was a change"
     )
-    message: str = Field(
-        description="Human-readable result message"
+    seat_facts: List[str] = Field(
+        description="Structured facts about the seat operation result"
+    )
+    reasoning: str = Field(
+        description="Tool's reasoning about how the result was determined"
     )
     special_service_noted: bool = Field(
         default=False,

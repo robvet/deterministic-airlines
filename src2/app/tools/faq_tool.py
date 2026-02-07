@@ -1,11 +1,16 @@
 """
-FAQ Tool - Answers policy questions using LLM with grounded data.
+FAQ Tool - Extracts relevant facts from knowledge base using LLM reasoning.
 
 This tool demonstrates:
 1. Loading an external prompt template
 2. Injecting grounding data (FAQ knowledge base)  
 3. Making an LLM call with structured output
-4. Validating the response with Pydantic
+4. Returning STRUCTURED DATA (not natural language)
+
+ARCHITECTURAL PATTERN:
+  - This tool uses LLM to reason over grounded knowledge
+  - It returns structured facts, NOT natural language
+  - The Orchestrator is responsible for NL generation
 
 SET BREAKPOINT in execute() to trace the full flow.
 """
@@ -24,6 +29,10 @@ class FAQTool:
     ensuring answers are factual and consistent.
     """
     
+    def build_request(self, classification) -> FAQRequest:
+        """Build FAQRequest from classification result."""
+        return FAQRequest(question=classification.rewritten_prompt)
+    
     def __init__(self, llm_service: LLMService, template_service: PromptTemplateService):
         """
         Initialize with required services.
@@ -38,14 +47,14 @@ class FAQTool:
     
     def execute(self, request: FAQRequest, context: AgentContext) -> FAQResponse:
         """
-        Answer a policy question using LLM reasoning over grounded FAQ data.
+        Extract relevant facts from knowledge base using LLM reasoning.
         
         Args:
             request: Validated FAQRequest containing the user's question
             context: Shared conversation context
             
         Returns:
-            Validated FAQResponse with answer and metadata
+            Validated FAQResponse with structured facts (not NL answer)
             
         DEBUGGING: 
             Set breakpoints and step through to see:
@@ -139,14 +148,19 @@ class FAQTool:
         # DETERMINISTIC PATTERN: Validate outputs before returning.
         # Even though LLMService validated the response, we verify
         # again at the tool boundary. Defense in depth.
+        #
+        # NOTE: We validate structured data (relevant_facts), not NL.
+        # The Orchestrator will generate natural language from this.
         # =================================================================
         assert isinstance(response, FAQResponse), \
             f"Expected FAQResponse, got {type(response)}"
-        assert response.answer, "FAQResponse.answer cannot be empty"
+        assert response.relevant_facts, "FAQResponse.relevant_facts cannot be empty"
+        assert len(response.relevant_facts) >= 1, "Must have at least one relevant fact"
         assert 0.0 <= response.confidence <= 1.0, \
             f"Confidence must be 0.0-1.0, got {response.confidence}"
-        print(f"[FAQTool] ✓ Validated FAQResponse")
-        print(f"[FAQTool]   Answer: {response.answer[:80]}...")
+        print(f"[FAQTool] ✓ Validated FAQResponse (structured data)")
+        print(f"[FAQTool]   Facts: {response.relevant_facts[:2]}{'...' if len(response.relevant_facts) > 2 else ''}")
         print(f"[FAQTool]   Confidence: {response.confidence}, Source: {response.source_topic}")
+        print(f"[FAQTool]   Reasoning: {response.reasoning[:80]}...")
         
         return response

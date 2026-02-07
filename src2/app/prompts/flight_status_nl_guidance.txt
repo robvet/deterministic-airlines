@@ -1,0 +1,13 @@
+For flight status responses, convert status_facts to a helpful response:
+
+FOUND (found=true):
+- Lead with the flight number and current status clearly
+- Include: origin, destination, departure time, arrival time
+- Display gate information prominently
+- If there's a connection warning, highlight it urgently
+- For delays, express concern and offer assistance
+
+NOT FOUND (found=false):
+- Apologize that flight wasn't found
+- Ask user to verify flight number or confirmation code
+- Offer to help search again

@@ -26,6 +26,16 @@ class CompensationTool:
     the type and severity of disruption.
     """
     
+    def build_request(self, classification) -> CompensationRequest:
+        """Build CompensationRequest from classification result."""
+        entities = {e.type: e.value for e in classification.entities}
+        return CompensationRequest(
+            question=classification.rewritten_prompt,
+            confirmation_number=entities.get("confirmation_number"),
+            flight_number=entities.get("flight_number"),
+            reason=entities.get("reason")
+        )
+    
     def __init__(self, llm_service: LLMService, template_service: PromptTemplateService):
         """
         Initialize with required services.
@@ -142,34 +152,38 @@ class CompensationTool:
         # =================================================================
         case_id = "CMP-" + "".join(random.choices(string.digits, k=4))
         
-        # Build response message
+        # Build structured facts and reasoning based on disruption level
+        compensation_facts = [f"Case ID: {case_id}"]
+        
         if disruption_level == "severe":
-            message = (
-                f"I've opened compensation case {case_id} for your disrupted travel. "
-                f"Due to your missed connection, you're entitled to overnight accommodations. "
-                f"Vouchers issued: {'; '.join(vouchers)}. "
-                f"Total compensation value: ${total_value:.2f}. "
-                "Please keep all receipts and attach them to your case for reimbursement of any additional expenses."
-            )
+            compensation_facts.extend([
+                "Disruption type: missed connection",
+                "Entitled to overnight accommodations"
+            ])
+            for voucher in vouchers:
+                compensation_facts.append(f"Voucher: {voucher}")
+            compensation_facts.append(f"Total compensation value: ${total_value:.2f}")
+            reasoning = "Severe disruption (missed connection) - full compensation package issued"
             next_steps = (
-                "1. Check in to partner hotel using your voucher. "
+                "1. Check in to partner hotel using voucher. "
                 "2. Use meal credit at airport restaurants. "
-                "3. Your rebooking is confirmed for tomorrow morning. "
-                "4. Save receipts for any additional expenses."
+                "3. Rebooking confirmed for tomorrow morning. "
+                "4. Save receipts for additional expenses."
             )
         elif disruption_level == "significant":
-            message = (
-                f"I've opened compensation case {case_id} for your delay. "
-                f"Vouchers issued: {'; '.join(vouchers)}. "
-                "These can be used at airport restaurants and shops."
-            )
-            next_steps = "Use your meal credit at any airport restaurant. Show this case number."
+            compensation_facts.append("Disruption type: significant delay")
+            for voucher in vouchers:
+                compensation_facts.append(f"Voucher: {voucher}")
+            compensation_facts.append("Vouchers valid at airport restaurants and shops")
+            reasoning = "Significant delay - meal credit compensation issued"
+            next_steps = "Use meal credit at any airport restaurant. Show case number."
         else:
-            message = (
-                f"I've documented your concern in case {case_id}. "
-                "A customer service representative will follow up within 24 hours. "
-                "If you experience further issues, reference this case number."
-            )
+            compensation_facts.extend([
+                "Disruption type: minor",
+                "Concern documented for follow-up",
+                "Customer service will respond within 24 hours"
+            ])
+            reasoning = "Minor disruption - documentation only, no vouchers required"
             next_steps = "No immediate action needed. We'll be in touch."
         
         response = CompensationResponse(
@@ -177,7 +191,8 @@ class CompensationTool:
             case_id=case_id,
             vouchers=vouchers,
             total_value=total_value if total_value > 0 else None,
-            message=message,
+            compensation_facts=compensation_facts,
+            reasoning=reasoning,
             next_steps=next_steps
         )
         

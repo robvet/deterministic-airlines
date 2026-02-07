@@ -41,8 +41,8 @@ Both entry points use the same `OrchestratorAgent` but serve different purposes:
 
 | Entry Point | Flow |
 |-------------|------|
-| `main.py` | REPL loop → `OrchestratorAgent.handle()` → Tool |
-| `run.py` | FastAPI → `/chat` endpoint → `OrchestratorAgent.handle()` → Tool |
+| `main.py` | REPL loop → `OrchestratorAgent.process_request()` → Tool |
+| `run.py` | FastAPI → `/chat` endpoint → `OrchestratorAgent.process_request()` → Tool |
 
 ### When to Use Each
 
@@ -50,7 +50,7 @@ Both entry points use the same `OrchestratorAgent` but serve different purposes:
 - Direct console access (type prompts, see responses immediately)
 - Easier breakpoint stepping (no async/HTTP overhead)
 - Single-threaded execution for predictable debugging
-- Set breakpoint on `orchestrator.handle()` line 78, then F5
+- Set breakpoint on `orchestrator.process_request()` line 78, then F5
 
 **run.py** - Use for production/UI:
 - Exposes REST API on port 8000

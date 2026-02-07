@@ -9,15 +9,47 @@ Makes it easy to:
 
 AUTHENTICATION:
 - Uses DefaultAzureCredential (supports Azure CLI, Managed Identity, VS Code, etc.)
+
+ERROR HANDLING:
+- Validation errors trigger one retry
+- If retry fails, raises LLMValidationError with details
+- Caller (Orchestrator) can catch and return user-friendly message
 """
 import json
 from typing import Type
 
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 from openai import AzureOpenAI
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from ..config.llm_config import LLMConfig
+
+
+class LLMValidationError(Exception):
+    """
+    Raised when LLM response fails validation after retry.
+    
+    Contains details about what failed so caller can return
+    a meaningful error message to the user.
+    """
+    def __init__(self, message: str, validation_errors: list[dict], raw_response: str):
+        super().__init__(message)
+        self.validation_errors = validation_errors
+        self.raw_response = raw_response
+    
+    def get_error_summary(self) -> str:
+        """Return a user-friendly summary of what went wrong."""
+        if not self.validation_errors:
+            return "Response format was invalid"
+        
+        # Extract field names and error types
+        issues = []
+        for err in self.validation_errors:
+            field = ".".join(str(loc) for loc in err.get("loc", ["unknown"]))
+            msg = err.get("msg", "invalid")
+            issues.append(f"{field}: {msg}")
+        
+        return "; ".join(issues[:3])  # Limit to first 3 issues
 
 
 class LLMService:
@@ -94,7 +126,24 @@ class LLMService:
         
         # If we want structured output, tell the LLM to return JSON
         if response_model is not None:
-            # Add JSON instruction to system prompt
+            # =============================================================
+            # SCHEMA_HINT: Inject Pydantic model's JSON Schema into prompt
+            # ---------------------------------------------------------
+            # model_json_schema() converts the Pydantic model into a formal
+            # JSON Schema specification. This tells the LLM exactly:
+            #   - Field names and types (string, number, array, etc.)
+            #   - Required vs optional fields
+            #   - Validation constraints (min/max, minLength, etc.)
+            #   - Field descriptions
+            #
+            # Each response_model produces a DIFFERENT schema:
+            #   - FAQResponse → {relevant_facts: [], confidence: 0-1, ...}
+            #   - ClassificationResponse → {intent: str, entities: [], ...}
+            #   - FlightStatusResponse → {found: bool, status: str, ...}
+            #
+            # This is how we get intent-specific structured outputs using
+            # one generic complete() method.
+            # =============================================================
             schema_hint = f"\n\nYou MUST respond with valid JSON matching this schema:\n{response_model.model_json_schema()}"
             messages[0]["content"] = system_prompt + schema_hint
             
@@ -123,27 +172,54 @@ class LLMService:
             print(f"[LLMService] Raw LLM response: {raw_content[:200]}...")
             
             # =============================================================
-            # BREAKPOINT 10b: JSON PARSING
+            # PARSE AND VALIDATE WITH RETRY
             # ---------------------------------------------------------
-            # Parse the raw string into a Python dict.
-            # If the LLM returned invalid JSON, this will raise an error.
+            # Try to parse and validate. If it fails, retry once.
+            # If retry also fails, raise LLMValidationError with details.
             # =============================================================
-            parsed_json = json.loads(raw_content)
+            max_attempts = 2
+            last_error = None
+            last_raw = raw_content
             
-            # =============================================================
-            # BREAKPOINT 10c: PYDANTIC VALIDATION
-            # ---------------------------------------------------------
-            # Validate the parsed dict against the Pydantic model.
-            # This ensures the structure matches our schema:
-            # - Required fields are present
-            # - Types are correct (str, float, list, etc.)
-            # - Constraints are met (e.g., confidence 0.0-1.0)
-            # If validation fails, Pydantic raises ValidationError.
-            # =============================================================
-            validated_response = response_model.model_validate(parsed_json)
-            print(f"[LLMService] Validated response type: {type(validated_response).__name__}")
+            for attempt in range(max_attempts):
+                try:
+                    # Attempt to parse JSON
+                    try:
+                        parsed_json = json.loads(last_raw)
+                    except json.JSONDecodeError as e:
+                        raise ValidationError.from_exception_data(
+                            "JSON parse error",
+                            [{"type": "json_invalid", "loc": ("response",), "msg": str(e)}]
+                        )
+                    
+                    # Validate against Pydantic model
+                    validated_response = response_model.model_validate(parsed_json)
+                    print(f"[LLMService] Validated response type: {type(validated_response).__name__}")
+                    return validated_response
+                    
+                except ValidationError as e:
+                    last_error = e
+                    print(f"[LLMService] Validation failed (attempt {attempt + 1}/{max_attempts}): {e.error_count()} errors")
+                    
+                    if attempt < max_attempts - 1:
+                        # Retry: make another LLM call
+                        print(f"[LLMService] Retrying LLM call...")
+                        retry_response = self._client.chat.completions.create(
+                            model=deployment,
+                            messages=messages,
+                            response_format={"type": "json_object"}
+                        )
+                        last_raw = retry_response.choices[0].message.content
+                        print(f"[LLMService] Retry response: {last_raw[:200]}...")
             
-            return validated_response
+            # If we get here, all attempts failed
+            error_details = last_error.errors() if last_error else []
+            print(f"[LLMService] All attempts failed. Raising LLMValidationError.")
+            raise LLMValidationError(
+                message=f"LLM response failed validation after {max_attempts} attempts",
+                validation_errors=error_details,
+                raw_response=last_raw
+            )
         
         else:
             # Simple text response

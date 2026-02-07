@@ -1,12 +1,22 @@
 """
 Flight Status Models - Request/Response schemas for flight status operations.
 
+=============================================================================
+STRUCTURED DATA OUTPUT (NO NATURAL LANGUAGE)
+=============================================================================
+
 These Pydantic models enforce structure at tool boundaries:
 - Input validation (what the tool receives)
 - Output validation (what the tool returns)
+
+ARCHITECTURAL PATTERN:
+  - Tool returns STRUCTURED DATA (status facts, reasoning)
+  - Orchestrator generates NATURAL LANGUAGE from structured data
+  - Single point of NL generation for consistency and control
+=============================================================================
 """
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List
 
 
 class FlightStatusRequest(BaseModel):
@@ -27,10 +37,19 @@ class FlightStatusRequest(BaseModel):
 
 class FlightStatusResponse(BaseModel):
     """
-    Response containing flight status information.
+    Structured output from the FlightStatus tool.
+    
+    NOTE: No 'message' field. The Orchestrator generates natural language
+    from the structured status_facts. This ensures consistent NL generation.
     """
     found: bool = Field(
         description="Whether the flight was found"
+    )
+    status_facts: List[str] = Field(
+        description="List of flight status details (flight, route, times, gate, warnings)"
+    )
+    reasoning: str = Field(
+        description="Brief explanation of the status lookup result"
     )
     flight_number: Optional[str] = Field(
         default=None,
@@ -59,7 +78,4 @@ class FlightStatusResponse(BaseModel):
     gate: Optional[str] = Field(
         default=None,
         description="Departure gate"
-    )
-    message: str = Field(
-        description="Human-readable status message"
     )

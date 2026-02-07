@@ -1,10 +1,19 @@
 """
 Baggage Tool - Handles baggage inquiries and lost bag claims.
 
+=============================================================================
+STRUCTURED DATA OUTPUT (NO NATURAL LANGUAGE)
+=============================================================================
+
 This tool demonstrates:
 1. Policy-based responses for baggage allowance and fees
 2. Filing lost bag claims with claim number generation
 3. Simple pattern matching for inquiry type detection
+
+ARCHITECTURAL PATTERN:
+  - Tool returns STRUCTURED DATA (policy facts, reasoning, claim info)
+  - Orchestrator generates NATURAL LANGUAGE from structured data
+  - Single point of NL generation for consistency and control
 
 SET BREAKPOINT in execute() to trace the full flow.
 """
@@ -48,6 +57,15 @@ class BaggageTool:
     Answers questions about allowances, fees, and lost bag claims
     using grounded policy data.
     """
+    
+    def build_request(self, classification) -> BaggageRequest:
+        """Build BaggageRequest from classification result."""
+        entities = {e.type: e.value for e in classification.entities}
+        return BaggageRequest(
+            question=classification.rewritten_prompt,
+            confirmation_number=entities.get("confirmation_number"),
+            baggage_tag=entities.get("baggage_tag")
+        )
     
     def __init__(self, llm_service: LLMService, template_service: PromptTemplateService):
         """
@@ -107,51 +125,66 @@ class BaggageTool:
         print(f"[BaggageTool] Detected category: {category}")
         
         # =================================================================
-        # BREAKPOINT 3: BUILD RESPONSE FROM POLICY DATA
+        # BREAKPOINT 3: BUILD STRUCTURED RESPONSE FROM POLICY DATA
+        # -----------------------------------------------------------------
+        # Returns STRUCTURED DATA, not natural language.
+        # Orchestrator will generate NL from these facts.
         # =================================================================
         claim_number = None
         tracking_url = None
+        policy_facts = []
+        reasoning = ""
         
         if category == "lost":
             # Generate a claim number for lost bag
             claim_number = "BG-" + "".join(random.choices(string.digits, k=6))
             tracking_url = f"https://deterministic.airlines/baggage/track/{claim_number}"
-            answer = (
-                f"I've filed a lost bag claim for you. Your claim number is {claim_number}. "
-                f"Policy details: {BAGGAGE_POLICIES['lost_bag']['claim_window']}. "
-                f"{BAGGAGE_POLICIES['lost_bag']['delivery_promise']}. "
-                f"While we locate your bag: {BAGGAGE_POLICIES['lost_bag']['interim_expenses']}. "
-                f"Track status at: {tracking_url}"
-            )
+            policy_facts = [
+                f"Claim number: {claim_number}",
+                f"Claim window: {BAGGAGE_POLICIES['lost_bag']['claim_window']}",
+                f"Delivery promise: {BAGGAGE_POLICIES['lost_bag']['delivery_promise']}",
+                f"Interim expenses: {BAGGAGE_POLICIES['lost_bag']['interim_expenses']}",
+                f"Tracking URL: {tracking_url}"
+            ]
+            reasoning = "User reported lost/missing bag - filed claim and provided tracking info"
+            
         elif category == "fees":
             fees = BAGGAGE_POLICIES["fees"]
-            answer = (
-                f"Baggage fees: Overweight (>50 lbs): {fees['overweight']}. "
-                f"Oversized: {fees['oversized']}. "
-                f"Extra bags: {fees['extra_bag']}. "
-                f"Sports equipment: {fees['sports_equipment']}."
-            )
+            policy_facts = [
+                f"Overweight bags (>50 lbs): {fees['overweight']}",
+                f"Oversized bags (>62 linear inches): {fees['oversized']}",
+                f"Extra bags (3rd+): {fees['extra_bag']}",
+                f"Sports equipment: {fees['sports_equipment']}"
+            ]
+            reasoning = "User asked about baggage fees - returning fee schedule from policy"
+            
         elif category == "allowance":
             allowance = BAGGAGE_POLICIES["allowance"]
-            answer = (
-                f"Baggage allowance: {allowance['carry_on']}. "
-                f"Checked bags: {allowance['checked_premium']}; economy class {allowance['checked_economy']}. "
-                f"Weight limit: {allowance['weight_limit']}."
-            )
+            policy_facts = [
+                f"Carry-on: {allowance['carry_on']}",
+                f"Premium checked: {allowance['checked_premium']}",
+                f"Economy checked: {allowance['checked_economy']}",
+                f"Weight limit: {allowance['weight_limit']}"
+            ]
+            reasoning = "User asked about baggage allowance - returning allowance limits from policy"
+            
         else:
-            answer = (
-                f"Baggage policy: {BAGGAGE_POLICIES['allowance']['carry_on']}. "
-                f"First checked bag: {BAGGAGE_POLICIES['allowance']['checked_economy']}. "
-                f"Weight limit: {BAGGAGE_POLICIES['allowance']['weight_limit']}. "
-                "For lost bags, please describe what happened and I'll file a claim."
-            )
+            # General policy overview
+            policy_facts = [
+                f"Carry-on allowance: {BAGGAGE_POLICIES['allowance']['carry_on']}",
+                f"First checked bag (economy): {BAGGAGE_POLICIES['allowance']['checked_economy']}",
+                f"Weight limit: {BAGGAGE_POLICIES['allowance']['weight_limit']}",
+                "For lost bags, describe what happened and we'll file a claim"
+            ]
+            reasoning = "General baggage policy inquiry - providing overview of key policies"
         
         response = BaggageResponse(
-            answer=answer,
+            policy_facts=policy_facts,
             category=category,
+            reasoning=reasoning,
             claim_number=claim_number,
             tracking_url=tracking_url
         )
         
-        print(f"[BaggageTool] ✓ Response ready, category: {category}")
+        print(f"[BaggageTool] ✓ Structured response ready, category: {category}, facts: {len(policy_facts)}")
         return response

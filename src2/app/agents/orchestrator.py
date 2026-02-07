@@ -5,35 +5,44 @@ This is the main entry point for handling user requests. It:
 1. Classifies intent using IntentClassifier (small model)
 2. Checks confidence and handles fallback if needed
 3. Routes to the appropriate tool from the registry
-4. Returns a standardized AgentResponse
+4. GENERATES NATURAL LANGUAGE from structured tool responses
+5. Returns a standardized AgentResponse
+
+ARCHITECTURAL PATTERN:
+- Tools return STRUCTURED DATA (facts, reasoning, confidence)
+- Orchestrator is the SINGLE POINT of natural language generation for outbound completions.
+- This ensures consistent tone, format, and response quality
 
 WORKSHOP OBJECTIVES DEMONSTRATED:
 - Tool discovery via ToolRegistry
 - Intent classification with confidence scoring
 - Prompt rewriting and entity extraction
 - Fallback handling for low confidence
+- Centralized NL generation from structured data
+
+DEBUGGING WALKTHROUGH:
+1. Set breakpoint on process_request() - this is the main entry point
+2. Step into _classifier.classify() to see intent classification
+3. Watch classification.confidence to see routing decision
+4. Step into _execute_tool() for high-confidence paths
+5. Watch tool.build_request() and tool.execute() for tool invocation
+6. Step into _nl_generator.generate() to see NL conversion
 """
 
 from ..models.agent_models import AgentResponse
 from ..models.classification import ClassificationResponse
 from ..models.context import AgentContext
-from ..models.faq import FAQRequest, FAQResponse
-from ..models.booking import BookFlightRequest, BookFlightResponse, CancelFlightRequest, CancelFlightResponse
-from ..models.flight_status import FlightStatusRequest, FlightStatusResponse
-from ..models.baggage import BaggageRequest, BaggageResponse
-from ..models.seat import SeatRequest, SeatResponse
-from ..models.compensation import CompensationRequest, CompensationResponse
 from ..memory import IMemoryStore, ConversationTurn
 from ..services.intent_classifier import IntentClassifier
 from ..services.llm_service import LLMService
+from ..services.nl_response_generator import NLResponseGenerator
 from ..services.prompt_template_service import PromptTemplateService
 from ..tools.tool_registry import ToolRegistry
+from ..config.settings import settings
 
 
-# Confidence thresholds
-CONFIDENCE_THRESHOLD_EXECUTE = 0.7   # Above this: execute the tool
-CONFIDENCE_THRESHOLD_CLARIFY = 0.4   # Above this but below execute: ask clarification
-# Below CLARIFY: fallback to human/general response
+# NOTE: Confidence thresholds are loaded from settings at runtime (not module-level constants).
+# This allows dynamic override via UI/API. See process_request() for threshold extraction.
 
 
 class OrchestratorAgent:
@@ -41,7 +50,7 @@ class OrchestratorAgent:
     Routes user requests to the appropriate tool.
     
     DEBUGGING:
-    Set a breakpoint on handle() and step through to see:
+    Set a breakpoint on process_request() and step through to see:
     1. Classification result (intent, confidence, entities)
     2. Confidence-based routing decision
     3. Tool instantiation from registry
@@ -64,16 +73,20 @@ class OrchestratorAgent:
         
         # Create the intent classifier (uses the small/fast model)
         self._classifier = IntentClassifier(llm_service, template_service)
+        
+        # Create the NL response generator
+        self._nl_generator = NLResponseGenerator(llm_service, template_service)
+        
         print(f"[OrchestratorAgent] Initialized")
     
-    def handle(
+    def process_request(
         self, 
         user_input: str, 
         context: AgentContext,
         bypass_classification: bool = False
     ) -> AgentResponse:
         """
-        Handle a user request end-to-end.
+        Process a user request end-to-end.
         
         Args:
             user_input: The raw user message
@@ -86,6 +99,16 @@ class OrchestratorAgent:
         DEBUGGING: This is the main entry point - set breakpoint here.
         """
         print(f"\n[Orchestrator] Received: {user_input}")
+        
+        # =================================================================
+        # GET CURRENT THRESHOLD VALUES
+        # -----------------------------------------------------------------
+        # Thresholds are loaded from settings but can be overridden per-request
+        # via the API (for dashboard tuning). Extract here for readability.
+        # =================================================================
+        execute_threshold = settings.confidence_threshold_execute
+        clarify_threshold = settings.confidence_threshold_clarify
+        print(f"[Orchestrator] Thresholds: execute={execute_threshold:.2f}, clarify={clarify_threshold:.2f}")
         
         # =================================================================
         # BYPASS MODE: Skip classification, call LLM directly (for demo)
@@ -124,7 +147,7 @@ class OrchestratorAgent:
         classification = self._classifier.classify(user_input, available_tools)
         
         # =================================================================
-        # BREAKPOINT 3: RECEIVE + VALIDATE CLASSIFICATION FROM INTENT
+        # Step 2: RECEIVE + VALIDATE CLASSIFICATION FROM INTENT
         # -----------------------------------------------------------------
         # DETERMINISTIC PATTERN: Validate inputs at every boundary.
         # Even though IntentClassifier validated before returning,
@@ -140,36 +163,37 @@ class OrchestratorAgent:
         print(f"[Orchestrator]   Available tools: {self._registry.list_tools()}")
         
         # =================================================================
-        # STEP 2: CONFIDENCE-BASED ROUTING DECISION
+        # STEP 3: CONFIDENCE-BASED ROUTING DECISION
         # -----------------------------------------------------------------
         # Three-tier decision based on confidence score:
         #
-        #   confidence < 0.4  → FALLBACK
+        #   confidence < clarify_threshold  → FALLBACK
         #       Model is very uncertain. Don't guess - apologize and
         #       ask user to rephrase. Avoids wrong tool execution.
         #
-        #   confidence 0.4-0.7 → CLARIFY  
+        #   confidence < execute_threshold → CLARIFY  
         #       Model has some idea but not confident. Ask user to
         #       confirm before executing. "Did you mean...?"
         #
-        #   confidence >= 0.7 → EXECUTE
+        #   confidence >= execute_threshold → EXECUTE
         #       Model is confident. Proceed to tool execution.
         #
+        # NOTE: Thresholds extracted above from settings (configurable via UI)
         # =================================================================
-        if classification.confidence < CONFIDENCE_THRESHOLD_CLARIFY:
-            # Very low confidence (< 0.4) - don't even guess
+        if classification.confidence < clarify_threshold:
+            # Very low confidence - don't even guess
             response = self._handle_fallback(user_input, classification)
             self._save_turn(context, user_input, response, classification)
             return response
         
-        if classification.confidence < CONFIDENCE_THRESHOLD_EXECUTE:
-            # Medium confidence (0.4 - 0.7) - ask for confirmation
+        if classification.confidence < execute_threshold:
+            # Medium confidence - ask for confirmation
             response = self._handle_clarification(user_input, classification)
             self._save_turn(context, user_input, response, classification)
             return response
         
         # =================================================================
-        # STEP 3: VERIFY TOOL EXISTS IN REGISTRY
+        # STEP 4: VERIFY TOOL EXISTS IN REGISTRY
         # -----------------------------------------------------------------
         # Safety check: classifier might return an intent that doesn't
         # match any registered tool (e.g., hallucinated tool name).
@@ -182,7 +206,7 @@ class OrchestratorAgent:
             return response
         
         # =================================================================
-        # STEP 4: GET TOOL FROM REGISTRY AND EXECUTE
+        # STEP 5: GET TOOL FROM REGISTRY AND EXECUTE
         # -----------------------------------------------------------------
         # High confidence (>= 0.7) - execute the tool.
         # Uses the REWRITTEN prompt (cleaner, more focused).
@@ -193,6 +217,7 @@ class OrchestratorAgent:
         response = self._execute_tool(user_input, classification, context)
         return response
     
+    # Executes tool called by process_request after classification, returns AgentResponse
     def _execute_tool(
         self,
         original_input: str,
@@ -200,10 +225,15 @@ class OrchestratorAgent:
         context: AgentContext
     ) -> AgentResponse:
         """
-        Get the tool from registry and execute it.
+        Get the tool from registry, execute it, and generate NL response.
         
         Called when confidence >= 0.7 (high confidence routing).
         Uses rewritten_prompt instead of original for cleaner input.
+        
+        ARCHITECTURAL PATTERN:
+        1. Tool returns STRUCTURED DATA (facts, confidence, reasoning)
+        2. Orchestrator generates NATURAL LANGUAGE from structured data
+        3. Single point of NL generation ensures consistency
         """
         print(f"[Orchestrator] Routing to: {classification.intent}")
         
@@ -215,35 +245,52 @@ class OrchestratorAgent:
         )
         
         # =================================================================
-        # BREAKPOINT 4: BUILD STRUCTURED REQUEST FOR TOOL
+        # Step 6: BUILD STRUCTURED REQUEST FOR TOOL
         # -----------------------------------------------------------------
-        # Create the appropriate request type based on the classified intent.
-        # Each tool has its own request model - we route to the right one.
+        # PATTERN: Open/Closed Principle (SOLID)
+        # 
+        # Each tool knows how to build its own request from classification.
+        # This eliminates the switch statement - tool owns its request type.
+        #
+        # BENEFIT: To add a new tool, you create a new class with its own
+        # build_request() method. The orchestrator never needs modification.
+        # - Open for extension (add new tools freely)
+        # - Closed for modification (orchestrator code unchanged)
         # =================================================================
-        request = self._build_request(classification)
+        request = tool.build_request(classification)
         print(f"[Orchestrator] ✓ Built {type(request).__name__}: '{classification.rewritten_prompt[:50]}...'")
         
-        # Execute the tool (this is where the main LLM work happens)
+        # Execute the tool - returns STRUCTURED DATA (not NL)
         tool_response = tool.execute(request, context)
         
         # =================================================================
-        # BREAKPOINT 12: RECEIVE + VALIDATE RESPONSE FROM TOOL
+        # Step 7: RECEIVE + VALIDATE STRUCTURED RESPONSE FROM TOOL
         # -----------------------------------------------------------------
         # DETERMINISTIC PATTERN: Validate all responses from external calls.
-        # Check we got a valid response with an answer/message.
+        # Tool responses now contain structured data, not NL answers.
         # =================================================================
-        answer = self._extract_answer(tool_response)
-        print(f"[Orchestrator] ✓ Received valid response from {classification.intent}")
+        print(f"[Orchestrator] ✓ Received structured response from {classification.intent}")
+        print(f"[Orchestrator]   Response type: {type(tool_response).__name__}")
         
         # =================================================================
-        # BREAKPOINT 13: ORCHESTRATOR REASONS + BUILDS FINAL RESPONSE
+        # Step 8: GENERATE NATURAL LANGUAGE FROM STRUCTURED DATA
         # -----------------------------------------------------------------
-        # Wrap the tool response in a standardized AgentResponse.
+        # NLResponseGenerator handles NL generation (extracted class).
+        # Tools return structured data, generator converts to NL.
+        # =================================================================
+        answer = self._nl_generator.generate(
+            tool_response=tool_response,
+            intent=classification.intent,
+            original_question=original_input,
+            context=context
+        )
+        print(f"[Orchestrator] ✓ Generated NL response ({len(answer)} chars)")
+        
+        # =================================================================
+        # Step 9: BUILD FINAL AGENT RESPONSE
+        # -----------------------------------------------------------------
+        # Wrap the generated NL in a standardized AgentResponse.
         # This is the final output that goes back to the user.
-        # In a more complex system, the orchestrator might:
-        # - Chain to another tool
-        # - Request clarification
-        # - Add follow-up suggestions
         # =================================================================
         final_response = AgentResponse(
             answer=answer,
@@ -269,16 +316,24 @@ class OrchestratorAgent:
         classification: ClassificationResponse
     ) -> AgentResponse:
         """
-        Handle medium-confidence (0.4 - 0.7) by asking for clarification.
+        Handle medium-confidence (between clarify and execute) by asking for clarification.
         
         The model has some idea what the user wants, but isn't confident.
         Ask the user to confirm before executing the wrong tool.
+        
+        Message loaded from: prompts/clarification_message.txt
         """
         print(f"[Orchestrator] Medium confidence ({classification.confidence:.2f}) - asking clarification")
         
+        # Load message template and fill placeholders
+        template = self._templates.load("clarification_message")
+        message = template.format(
+            detected_intent=classification.intent,
+            confidence=f"{classification.confidence:.2f}"
+        )
+        
         return AgentResponse(
-            answer=f"I'm not quite sure I understand. Could you rephrase your question? "
-                   f"I think you might be asking about {classification.intent}, but I want to make sure.",
+            answer=message,
             routed_to="clarification",
             confidence=classification.confidence,
             original_input=original_input,
@@ -292,17 +347,36 @@ class OrchestratorAgent:
         classification: ClassificationResponse
     ) -> AgentResponse:
         """
-        Handle very low confidence (< 0.4) or unknown intent.
+        Handle very low confidence (< clarify threshold) or unknown intent.
         
         The model is too uncertain to even guess. Don't risk executing
         the wrong tool - apologize and list what we CAN help with.
+        
+        Message loaded from: prompts/fallback_message.txt
         """
         print(f"[Orchestrator] Fallback - confidence too low ({classification.confidence:.2f})")
         
+        # Build capability list from registered tools
+        available_capabilities = "- " + "\n- ".join([
+            "baggage (lost bags, claims, policies)",
+            "booking (search and book flights)", 
+            "cancellation (cancel existing bookings)",
+            "flight status (delays, gates, times)",
+            "seat selection (changes, preferences)",
+            "compensation (delays, disruptions)",
+            "FAQs (policies, general questions)"
+        ])
+        
+        # Load message template and fill placeholders
+        template = self._templates.load("fallback_message")
+        message = template.format(
+            available_capabilities=available_capabilities,
+            confidence=f"{classification.confidence:.2f}",
+            detected_intent=classification.intent
+        )
+        
         return AgentResponse(
-            answer="I'm sorry, I'm not sure how to help with that. "
-                   "I can help you with questions about baggage, policies, booking, or refunds. "
-                   "Could you try rephrasing your question?",
+            answer=message,
             routed_to="fallback",
             confidence=classification.confidence,
             original_input=original_input,
@@ -310,6 +384,7 @@ class OrchestratorAgent:
             entities=[{"type": e.type, "value": e.value} for e in classification.entities]
         )
     
+    # Saves conversation turn to memory with structured data for analysis and future context
     def _save_turn(
         self,
         context: AgentContext,
@@ -348,90 +423,3 @@ class OrchestratorAgent:
         # Use customer_name as session_id (in production, use a real session ID)
         session_id = context.customer_name
         self._memory.save_turn(session_id, turn)
-    
-    def _build_request(self, classification: ClassificationResponse):
-        """
-        Build the appropriate request object based on classified intent.
-        
-        This factory method routes to the right request type:
-        - faq → FAQRequest
-        - book_flight → BookFlightRequest  
-        - cancel_flight → CancelFlightRequest
-        - flight_status → FlightStatusRequest
-        - baggage → BaggageRequest
-        - seat → SeatRequest
-        - compensation → CompensationRequest
-        """
-        intent = classification.intent
-        entities = {e.type: e.value for e in classification.entities}
-        
-        if intent == "faq":
-            return FAQRequest(question=classification.rewritten_prompt)
-        
-        elif intent == "book_flight":
-            return BookFlightRequest(
-                flight_number=entities.get("flight_number"),
-                origin=entities.get("origin"),
-                destination=entities.get("destination"),
-                date=entities.get("date"),
-                passenger_name=entities.get("passenger_name")
-            )
-        
-        elif intent == "cancel_flight":
-            return CancelFlightRequest(
-                confirmation_number=entities.get("confirmation_number"),
-                flight_number=entities.get("flight_number"),
-                reason=entities.get("reason")
-            )
-        
-        elif intent == "flight_status":
-            return FlightStatusRequest(
-                flight_number=entities.get("flight_number"),
-                confirmation_number=entities.get("confirmation_number")
-            )
-        
-        elif intent == "baggage":
-            return BaggageRequest(
-                question=classification.rewritten_prompt,
-                confirmation_number=entities.get("confirmation_number"),
-                baggage_tag=entities.get("baggage_tag")
-            )
-        
-        elif intent == "seat":
-            return SeatRequest(
-                question=classification.rewritten_prompt,
-                confirmation_number=entities.get("confirmation_number"),
-                flight_number=entities.get("flight_number"),
-                requested_seat=entities.get("seat_number"),
-                preference=entities.get("preference"),
-                special_needs=entities.get("special_needs")
-            )
-        
-        elif intent == "compensation":
-            return CompensationRequest(
-                question=classification.rewritten_prompt,
-                confirmation_number=entities.get("confirmation_number"),
-                flight_number=entities.get("flight_number"),
-                reason=entities.get("reason")
-            )
-        
-        else:
-            # Default to FAQ for unknown intents
-            print(f"[Orchestrator] Unknown intent '{intent}', defaulting to FAQ")
-            return FAQRequest(question=classification.rewritten_prompt)
-    
-    def _extract_answer(self, tool_response) -> str:
-        """
-        Extract the answer/message from a tool response.
-        
-        Different tools return different response types:
-        - FAQResponse has .answer
-        - BookFlightResponse has .message
-        - CancelFlightResponse has .message
-        """
-        if hasattr(tool_response, 'answer'):
-            return tool_response.answer
-        elif hasattr(tool_response, 'message'):
-            return tool_response.message
-        else:
-            return str(tool_response)

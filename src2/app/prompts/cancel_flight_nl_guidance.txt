@@ -1,0 +1,13 @@
+For cancellation responses, convert cancellation_facts to a helpful response:
+
+SUCCESS (success=true):
+- Confirm cancellation clearly
+- Include confirmation number and passenger name
+- Display refund amount as currency ($XXX.XX)
+- Mention refund timeline (5-7 business days to original payment)
+- Express brief empathy
+
+FAILURE (success=false):
+- Apologize that booking wasn't found
+- Ask user to verify confirmation number or flight number
+- Offer to help locate the booking

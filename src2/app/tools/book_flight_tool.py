@@ -1,11 +1,20 @@
 """
 Book Flight Tool - Handles new flight bookings.
 
+=============================================================================
+STRUCTURED DATA OUTPUT (NO NATURAL LANGUAGE)
+=============================================================================
+
 This tool demonstrates:
 1. Loading flight inventory (grounding data)
 2. Making an LLM call to extract booking details
 3. Simulating a booking operation
 4. Returning structured response
+
+ARCHITECTURAL PATTERN:
+  - Tool returns STRUCTURED DATA (booking facts, reasoning)
+  - Orchestrator generates NATURAL LANGUAGE from structured data
+  - Single point of NL generation for consistency and control
 
 SET BREAKPOINT in execute() to trace the full flow.
 """
@@ -26,6 +35,17 @@ class BookFlightTool:
     Uses an LLM to understand booking intent and match against
     available flight inventory.
     """
+    
+    def build_request(self, classification) -> BookFlightRequest:
+        """Build BookFlightRequest from classification result."""
+        entities = {e.type: e.value for e in classification.entities}
+        return BookFlightRequest(
+            flight_number=entities.get("flight_number"),
+            origin=entities.get("origin"),
+            destination=entities.get("destination"),
+            date=entities.get("date"),
+            passenger_name=entities.get("passenger_name")
+        )
     
     def __init__(self, llm_service: LLMService, template_service: PromptTemplateService):
         """
@@ -120,31 +140,43 @@ class BookFlightTool:
             print(f"[BookFlightTool] No matching flights found")
             return BookFlightResponse(
                 success=False,
-                message="No available flights match your request. Please try different dates or destinations."
+                booking_facts=[
+                    "No available flights match your request",
+                    f"Requested flight: {request.flight_number or 'not specified'}",
+                    f"Requested destination: {request.destination or 'not specified'}"
+                ],
+                reasoning="Could not find matching flight in available inventory"
             )
         
         # =================================================================
         # BREAKPOINT 5: GENERATE CONFIRMATION
+        # -----------------------------------------------------------------
+        # Returns STRUCTURED DATA, not natural language.
+        # Orchestrator will generate NL from these facts.
         # =================================================================
         confirmation = "DA-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=5))
         seat = f"{random.randint(1, 30)}{random.choice(['A', 'B', 'C', 'D', 'E', 'F'])}"
         
+        booking_facts = [
+            f"Flight: {selected_flight['flight_number']}",
+            f"Route: {selected_flight['origin']} to {selected_flight['destination']}",
+            f"Departure: {selected_flight['departure']}",
+            f"Confirmation: {confirmation}",
+            f"Seat: {seat}"
+        ]
+        
         response = BookFlightResponse(
             success=True,
+            booking_facts=booking_facts,
+            reasoning=f"Matched flight {selected_flight['flight_number']} and assigned seat {seat}",
             confirmation_number=confirmation,
             flight_number=selected_flight["flight_number"],
-            seat_assignment=seat,
-            message=(
-                f"Successfully booked flight {selected_flight['flight_number']} "
-                f"from {selected_flight['origin']} to {selected_flight['destination']}. "
-                f"Departure: {selected_flight['departure']}. "
-                f"Confirmation: {confirmation}. Seat: {seat}."
-            )
+            seat_assignment=seat
         )
         
         # Validate output
         assert isinstance(response, BookFlightResponse)
         assert response.confirmation_number, "Confirmation number required for successful booking"
-        print(f"[BookFlightTool] ✓ Booking complete: {confirmation}")
+        print(f"[BookFlightTool] ✓ Booking complete: {confirmation}, facts: {len(booking_facts)}")
         
         return response

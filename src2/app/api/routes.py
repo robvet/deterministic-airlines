@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from ..agents.orchestrator import OrchestratorAgent
 from ..config.llm_config import LLMConfig
+from ..config.settings import settings
 from ..memory import InMemoryStore
 from ..models.context import AgentContext
 from ..services.llm_service import LLMService
@@ -31,6 +32,9 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="User message")
     customer_name: str = Field(default="Guest", description="Customer name for context")
     bypass_classification: bool = Field(default=False, description="Skip intent classification, call LLM directly")
+    # Optional threshold overrides (for dashboard tuning)
+    confidence_threshold_execute: float | None = Field(default=None, description="Override execute threshold")
+    confidence_threshold_clarify: float | None = Field(default=None, description="Override clarify threshold")
 
 
 class ChatResponse(BaseModel):
@@ -78,9 +82,11 @@ def get_orchestrator() -> OrchestratorAgent:
             description="Cancels an existing flight booking and processes refunds",
             tool_class=CancelFlightTool
         )
-        # registry.register(
-        #    # ToDo Register Flight Status tool 
-        # )
+        registry.register(
+            name="flight_status",
+            description="Checks flight status including delays, cancellations, gate info, and connection impacts",
+            tool_class=FlightStatusTool
+        )
         registry.register(
             name="baggage",
             description="Handles baggage inquiries including allowance, fees, and lost bag claims",
@@ -93,7 +99,7 @@ def get_orchestrator() -> OrchestratorAgent:
         )
         registry.register(
             name="compensation",
-            description="Processes compensation requests for delays, cancellations, and missed connections",
+            description="Processes compensation requests including vouchers, hotel credits, meal credits, and refunds for delays, cancellations, and missed connections",
             tool_class=CompensationTool
         )
         
@@ -145,8 +151,14 @@ async def chat(
     
     context.turn_count += 1
     
+    # Apply threshold overrides if provided (for dashboard tuning)
+    if request.confidence_threshold_execute is not None:
+        settings.confidence_threshold_execute = request.confidence_threshold_execute
+    if request.confidence_threshold_clarify is not None:
+        settings.confidence_threshold_clarify = request.confidence_threshold_clarify
+    
     # Call orchestrator
-    response = orchestrator.handle(request.message, context, bypass_classification=request.bypass_classification)
+    response = orchestrator.process_request(request.message, context, bypass_classification=request.bypass_classification)
     
     return ChatResponse(
         answer=response.answer,
