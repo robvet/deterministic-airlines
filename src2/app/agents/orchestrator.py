@@ -30,7 +30,7 @@ DEBUGGING WALKTHROUGH:
 """
 
 from ..models.agent_models import AgentResponse
-from ..models.classification import ClassificationResponse
+from ..models.classification import ClassificationRequest, ClassificationResponse
 from ..models.context import AgentContext
 from ..memory import IMemoryStore, ConversationTurn
 from ..services.intent_classifier import IntentClassifier
@@ -130,11 +130,42 @@ class OrchestratorAgent:
             )
         
         # =================================================================
-        # STEP 1: CLASSIFY INTENT
+        # STEP 0: LOAD CONVERSATION CONTEXT FROM MEMORY
         # -----------------------------------------------------------------
-        # Calls IntentClassifier with:
-        #   - user_input: raw message from user
-        #   - available_tools: list of registered tools for LLM to pick from
+        # MULTI-TURN CONTEXT PATTERN:
+        # Before classifying, we load prior conversation state:
+        #   - session_entities: Accumulated entities across ALL turns
+        #   - recent_turns: Last K turns (sliding window)
+        #
+        # This enables the classifier to understand follow-up questions:
+        #   "What's my refund status?" → knows about prior cancellation
+        #
+        # WHY BEFORE CLASSIFICATION:
+        # The classifier needs context to make informed routing decisions.
+        # Without it, ambiguous queries route incorrectly.
+        # =================================================================
+        session_id = context.customer_name  # Demo uses customer_name as session
+        session_entities = self._memory.get_entities(session_id)
+        recent_turns = self._memory.get_turns(session_id, limit=settings.context_window_size)
+        
+        if session_entities or recent_turns:
+            print(f"[Orchestrator] Loaded context: {len(session_entities)} entities, {len(recent_turns)} recent turns")
+        
+        # =================================================================
+        # STEP 1: BUILD CLASSIFICATION REQUEST + CLASSIFY INTENT
+        # -----------------------------------------------------------------
+        # STRUCTURED REQUEST PATTERN:
+        # Instead of passing loose parameters, we bundle everything into
+        # a typed ClassificationRequest object. This:
+        #   - Ensures type safety (Pydantic validation)
+        #   - Makes the contract explicit
+        #   - Enables easy testing (construct request objects)
+        #
+        # The classifier receives:
+        #   - user_input: current turn's raw message
+        #   - available_tools: registered tools for LLM to pick from
+        #   - session_entities: accumulated state (e.g., booking_id)
+        #   - recent_turns: sliding window of recent conversation
         #
         # Returns ClassificationResponse:
         #   - intent: "faq", "booking", etc. (which tool to use)
@@ -144,7 +175,15 @@ class OrchestratorAgent:
         #   - entities: extracted info (dates, locations, etc.)
         # =================================================================
         available_tools = self._registry.get_routing_descriptions()
-        classification = self._classifier.classify(user_input, available_tools)
+        
+        classification_request = ClassificationRequest(
+            user_input=user_input,
+            available_tools=available_tools,
+            session_entities=session_entities,
+            recent_turns=recent_turns
+        )
+        
+        classification = self._classifier.classify(classification_request)
         
         # =================================================================
         # Step 2: RECEIVE + VALIDATE CLASSIFICATION FROM INTENT

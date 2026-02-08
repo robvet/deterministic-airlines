@@ -4,11 +4,11 @@ Your job is to analyze the user's input and:
 1. Determine which tool should handle this request
 2. Extract key entities (dates, locations, flight numbers, topics, etc.)
 3. Rewrite the prompt to be clear and concise
-
+{conversation_context}
 AVAILABLE TOOLS:
 {available_tools}
 
-USER PROMPT:
+CURRENT USER QUERY:
 {user_prompt}
 
 INSTRUCTIONS:
@@ -16,6 +16,7 @@ INSTRUCTIONS:
 - The intent MUST be the EXACT tool name from the list above (e.g., "faq", "book_flight", "cancel_flight")
 - Confidence should be 0.0 to 1.0 (use 0.9+ only when very certain)
 - Extract any relevant entities (dates, locations, names, amounts, flight numbers, topics)
+- If the user references something from prior conversation (e.g., "that booking", "my refund"), use session entities
 - Rewrite the prompt to remove noise, be concise, and focus on the actual question
 - If the request doesn't match any tool well, still pick the closest match but with lower confidence
 

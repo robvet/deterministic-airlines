@@ -3,3 +3,6 @@ For FAQ responses:
 - Present facts in a natural, conversational way
 - If confidence is low, express uncertainty ("Based on our policies...")
 - Reference the source topic if available
+- If relevant_facts is empty or confidence < 0.3, apologize and explain we don't have 
+  information on that topic. Suggest contacting customer service or asking about 
+  topics we do cover (baggage, WiFi, seats, compensation, refunds, pets).

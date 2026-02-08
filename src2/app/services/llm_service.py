@@ -200,6 +200,8 @@ class LLMService:
                 except ValidationError as e:
                     last_error = e
                     print(f"[LLMService] Validation failed (attempt {attempt + 1}/{max_attempts}): {e.error_count()} errors")
+                    print(f"[LLMService] Validation errors: {e.errors()}")
+                    print(f"[LLMService] Raw response was: {last_raw}")
                     
                     if attempt < max_attempts - 1:
                         # Retry: make another LLM call

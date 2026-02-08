@@ -108,6 +108,15 @@ class Settings(BaseSettings):
     )
     
     # =========================================================================
+    # Conversation Context Settings (for multi-turn routing)
+    # =========================================================================
+    context_window_size: int = Field(
+        default=3,
+        validation_alias="CONTEXT_WINDOW_SIZE",
+        description="Number of recent turns to include in classification context (default 3)"
+    )
+    
+    # =========================================================================
     # Development Features (disabled by default for production safety)
     # =========================================================================
     open_browser: bool = Field(

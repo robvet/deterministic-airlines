@@ -151,15 +151,19 @@ class FAQTool:
         #
         # NOTE: We validate structured data (relevant_facts), not NL.
         # The Orchestrator will generate natural language from this.
+        # Empty relevant_facts is valid - means question not covered by KB.
         # =================================================================
         assert isinstance(response, FAQResponse), \
             f"Expected FAQResponse, got {type(response)}"
-        assert response.relevant_facts, "FAQResponse.relevant_facts cannot be empty"
-        assert len(response.relevant_facts) >= 1, "Must have at least one relevant fact"
         assert 0.0 <= response.confidence <= 1.0, \
             f"Confidence must be 0.0-1.0, got {response.confidence}"
-        print(f"[FAQTool] ✓ Validated FAQResponse (structured data)")
-        print(f"[FAQTool]   Facts: {response.relevant_facts[:2]}{'...' if len(response.relevant_facts) > 2 else ''}")
+        
+        # Log based on whether we found facts
+        if response.relevant_facts:
+            print(f"[FAQTool] ✓ Validated FAQResponse with {len(response.relevant_facts)} facts")
+            print(f"[FAQTool]   Facts: {response.relevant_facts[:2]}{'...' if len(response.relevant_facts) > 2 else ''}")
+        else:
+            print(f"[FAQTool] ✓ Validated FAQResponse - no matching facts (confidence: {response.confidence})")
         print(f"[FAQTool]   Confidence: {response.confidence}, Source: {response.source_topic}")
         print(f"[FAQTool]   Reasoning: {response.reasoning[:80]}...")
         

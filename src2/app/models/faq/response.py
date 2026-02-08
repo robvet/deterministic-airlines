@@ -58,9 +58,10 @@ class FAQResponse(BaseModel):
     # its grounded reasoning. The Orchestrator will convert these to NL.
     #
     # Example: ["Carry-on size: 22x14x9 inches", "One personal item included"]
+    # NOTE: Can be empty if question not covered by knowledge base
     # ==========================================================================
     relevant_facts: List[str] = Field(
-        min_length=1,  # Must have at least one fact
+        default_factory=list,  # Allow empty if no matching facts
         description="List of relevant facts from the knowledge base that answer the question"
     )
     
