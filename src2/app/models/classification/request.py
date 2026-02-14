@@ -76,10 +76,19 @@ class ClassificationRequest(BaseModel):
         description="Last K turns for conversation context (newest first)"
     )
     
+    # ========================================================================
+    # PROGRESSIVE SUMMARY (compressed older turns)
+    # ========================================================================
+    
+    conversation_summary: str = Field(
+        default="",
+        description="Compressed summary of turns that fell off the sliding window"
+    )
+    
     @property
     def has_history(self) -> bool:
         """Returns True if there's any prior conversation context."""
-        return bool(self.session_entities or self.recent_turns)
+        return bool(self.session_entities or self.recent_turns or self.conversation_summary)
     
     @property
     def turn_count(self) -> int:

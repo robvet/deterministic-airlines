@@ -94,15 +94,18 @@ class IntentClassifier:
         # With context (prior cancellation of IR-D204), it routes correctly.
         #
         # The _format_conversation_context method builds a text block:
+        #   - Conversation summary (compressed older turns)
         #   - Session entities (accumulated state)
         #   - Recent turns (sliding window of last K turns)
         # =================================================================
         conversation_context = self._format_conversation_context(
             request.session_entities,
-            request.recent_turns
+            request.recent_turns,
+            request.conversation_summary
         )
         if conversation_context:
-            print(f"[IntentClassifier] Including conversation context ({len(request.recent_turns)} turns, {len(request.session_entities)} entities)")
+            has_summary = "with summary" if request.conversation_summary else "no summary"
+            print(f"[IntentClassifier] Including conversation context ({len(request.recent_turns)} turns, {len(request.session_entities)} entities, {has_summary})")
         
         # =================================================================
         # STEP 1: BUILD CLASSIFICATION PROMPT
@@ -183,19 +186,22 @@ class IntentClassifier:
     def _format_conversation_context(
         self,
         session_entities: dict[str, str],
-        recent_turns: list[ConversationTurn]
+        recent_turns: list[ConversationTurn],
+        conversation_summary: str = ""
     ) -> str:
         """
         Format conversation history into a text block for the classifier prompt.
         
         This method builds a human-readable summary of:
-        1. Session entities (accumulated state across all turns)
-        2. Recent turns (sliding window of last K turns)
+        1. Conversation summary (compressed older turns)
+        2. Session entities (accumulated state across all turns)
+        3. Recent turns (sliding window of last K turns)
         
         Returns empty string if no history exists (first turn).
         
         WORKSHOP NOTE:
         This is the key to multi-turn context. The classifier sees:
+        - Compressed summary of older conversation (progressive summarization)
         - What entities have been mentioned (booking_id, flight, etc.)
         - What topics were discussed recently
         - How the conversation has flowed
@@ -204,6 +210,13 @@ class IntentClassifier:
         route correctly based on prior cancellation discussion.
         """
         parts = []
+        
+        # =====================================================================
+        # CONVERSATION SUMMARY: Compressed older turns
+        # =====================================================================
+        if conversation_summary:
+            parts.append("\nCONVERSATION SUMMARY (older turns, compressed):")
+            parts.append(conversation_summary)
         
         # =====================================================================
         # SESSION ENTITIES: Accumulated state from all prior turns

@@ -2,7 +2,7 @@
 # Start both frontend and backend
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SRC2_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
+SRC2_DIR="$(dirname "$(dirname "$(dirname "$SCRIPT_DIR")")")" 
 VENV_DIR="$SRC2_DIR/../.venv"
 
 # Detect OS: Windows uses Scripts/, Unix uses bin/
