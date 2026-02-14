@@ -34,6 +34,8 @@ class InMemoryStore:
     def __init__(self):
         # session_id -> list of turns
         self._sessions: dict[str, list[ConversationTurn]] = {}
+        # session_id -> progressive summary
+        self._summaries: dict[str, str] = {}
         print(f"[InMemoryStore] Initialized")
     
     def save_turn(self, session_id: str, turn: ConversationTurn) -> None:
@@ -72,4 +74,30 @@ class InMemoryStore:
         """Clear all turns for this session."""
         if session_id in self._sessions:
             del self._sessions[session_id]
-            print(f"[InMemoryStore] Cleared session {session_id}")
+        if session_id in self._summaries:
+            del self._summaries[session_id]
+        print(f"[InMemoryStore] Cleared session {session_id}")
+    
+    def get_summary(self, session_id: str) -> str:
+        """Get the progressive summary for this session."""
+        return self._summaries.get(session_id, "")
+    
+    def save_summary(self, session_id: str, summary: str) -> None:
+        """Save the updated progressive summary."""
+        self._summaries[session_id] = summary
+        print(f"[InMemoryStore] Saved summary for session {session_id} ({len(summary)} chars)")
+    
+    def pop_oldest_turn(self, session_id: str) -> "ConversationTurn | None":
+        """Remove and return the oldest turn."""
+        if session_id not in self._sessions or not self._sessions[session_id]:
+            return None
+        
+        oldest = self._sessions[session_id].pop(0)  # Remove from front (oldest)
+        print(f"[InMemoryStore] Popped oldest turn from session {session_id}")
+        return oldest
+    
+    def get_turn_count(self, session_id: str) -> int:
+        """Get total number of turns stored."""
+        if session_id not in self._sessions:
+            return 0
+        return len(self._sessions[session_id])

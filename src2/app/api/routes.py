@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from ..agents.orchestrator import OrchestratorAgent
 from ..config.llm_config import LLMConfig
 from ..config.settings import settings
+from ..services.llm_service import LLMValidationError
 from ..memory import InMemoryStore
 from ..models.context import AgentContext
 from ..services.llm_service import LLMService
@@ -157,16 +158,45 @@ async def chat(
     if request.confidence_threshold_clarify is not None:
         settings.confidence_threshold_clarify = request.confidence_threshold_clarify
     
-    # Call orchestrator
-    response = orchestrator.process_request(request.message, context, bypass_classification=request.bypass_classification)
-    
-    return ChatResponse(
-        answer=response.answer,
-        routed_to=response.routed_to,
-        confidence=response.confidence,
-        rewritten_input=response.rewritten_input,
-        entities=[{"type": e.type, "value": e.value} for e in response.entities]
-    )
+    # =========================================================================
+    # CALL ORCHESTRATOR WITH ERROR HANDLING
+    # -------------------------------------------------------------------------
+    # Wrap orchestrator call in try/catch to prevent 500 errors on tool failures.
+    # LLM responses can fail validation - return a graceful message instead.
+    # =========================================================================
+    try:
+        response = orchestrator.process_request(
+            request.message, 
+            context, 
+            bypass_classification=request.bypass_classification
+        )
+        return ChatResponse(
+            answer=response.answer,
+            routed_to=response.routed_to,
+            confidence=response.confidence,
+            rewritten_input=response.rewritten_input,
+            entities=[{"type": e.type, "value": e.value} for e in response.entities]
+        )
+    except LLMValidationError as e:
+        # LLM returned invalid response - return graceful fallback
+        print(f"[Routes] LLM validation error: {e.message}")
+        return ChatResponse(
+            answer="I apologize, but I encountered an issue processing your request. Could you please rephrase your question or try again?",
+            routed_to="error",
+            confidence=0.0,
+            rewritten_input=request.message,
+            entities=[]
+        )
+    except Exception as e:
+        # Unexpected error - log and return generic fallback
+        print(f"[Routes] Unexpected error: {type(e).__name__}: {e}")
+        return ChatResponse(
+            answer="I apologize, but something went wrong. Please try again or contact customer service for assistance.",
+            routed_to="error",
+            confidence=0.0,
+            rewritten_input=request.message,
+            entities=[]
+        )
 
 
 @router.get("/health")

@@ -38,7 +38,8 @@ still handling unrecognized requests gracefully.
 # ClassificationResponse: A Pydantic data model that is constructed from the LLM's JSON output.
 # Defines the schema: intent, confidence, reasoning, rewritten_prompt, entities
 # See: app/models/classification/response.py
-from ..models.classification import ClassificationResponse
+from ..models.classification import ClassificationRequest, ClassificationResponse
+from ..memory.models import ConversationTurn
 from .llm_service import LLMService
 from .prompt_template_service import PromptTemplateService
 
@@ -70,16 +71,44 @@ class IntentClassifier:
     # Main method to classify the intent for each user input
     def classify(
         self, 
-        user_prompt: str, 
-        available_tools: str # List of registered tools from the tool registry
-    ) -> ClassificationResponse: # Note that ClassificationResponse is the return 
-                                 # type of this method
+        request: ClassificationRequest  # Structured request with user input + context
+    ) -> ClassificationResponse:
         """
-        Classify intent by sending the user prompt and available tools to an SLM
+        Classify intent by sending the user prompt and conversation context to an SLM.
+        
+        Args:
+            request: ClassificationRequest containing user_input, available_tools,
+                     session_entities (accumulated), and recent_turns (sliding window)
+        
+        Returns:
+            ClassificationResponse with intent, confidence, entities, rewritten_prompt
+        
         DEBUGGING: Step into this method to see classification in action.
         """
         # =================================================================
-        # STEP 0: BUILD CLASSIFICATION PROMPT
+        # STEP 0: FORMAT CONVERSATION CONTEXT (if any history exists)
+        # -----------------------------------------------------------------
+        # MULTI-TURN CONTEXT PATTERN:
+        # The classifier needs prior conversation to make informed routing.
+        # Without context, "What's my refund status?" is ambiguous.
+        # With context (prior cancellation of IR-D204), it routes correctly.
+        #
+        # The _format_conversation_context method builds a text block:
+        #   - Conversation summary (compressed older turns)
+        #   - Session entities (accumulated state)
+        #   - Recent turns (sliding window of last K turns)
+        # =================================================================
+        conversation_context = self._format_conversation_context(
+            request.session_entities,
+            request.recent_turns,
+            request.conversation_summary
+        )
+        if conversation_context:
+            has_summary = "with summary" if request.conversation_summary else "no summary"
+            print(f"[IntentClassifier] Including conversation context ({len(request.recent_turns)} turns, {len(request.session_entities)} entities, {has_summary})")
+        
+        # =================================================================
+        # STEP 1: BUILD CLASSIFICATION PROMPT
         # -----------------------------------------------------------------
         # THIS IS WHERE THE MAGIC HAPPENS - the prompt template tells
         # the LLM HOW to figure out the intent. See: prompts/intent_prompt.txt
@@ -89,24 +118,22 @@ class IntentClassifier:
         #    Analyze the USER PROMPT: {user_prompt}.
         #    Pick the ONE best tool. Give a confidence score."
         #
-        # So the LLM REASONS: "User said 'what's your baggage policy?'
-        # That sounds like a general question → 'faq' tool, confidence 0.85"
-        #
-        # The LLM infers which tool description best matches the user's intent. 
+        # Now also includes conversation context for multi-turn routing.
         # =================================================================
         
         # Dynamically construct the system prompt for the SLM call
         system_prompt = self._templates.load(
             "intent_prompt",
             {
-                "available_tools": available_tools, # registered tools for the app
-                "user_prompt": user_prompt
+                "available_tools": request.available_tools,
+                "user_prompt": request.user_input,
+                "conversation_context": conversation_context
             }
         )
         print(f"[IntentClassifier] Built classification prompt ({len(system_prompt)} chars)")
         
         # ==================================================================
-        # Step 1: SLM CALL - returns structured JSON object describing user 
+        # Step 2: SLM CALL - returns structured JSON object describing user 
         # intent as opposed to unstructured text increasing determinism
         # ------------------------------------------------------------------
         #   response.intent          ← LLM's DECISION: which tool to use
@@ -117,7 +144,7 @@ class IntentClassifier:
         # ==================================================================
         response = self._llm.complete(
             system_prompt=system_prompt,
-            user_message=user_prompt,
+            user_message=request.user_input,
             response_model=ClassificationResponse,  # LLM's JSON → Pydantic object
             use_classifier_model=True  # gpt-4.1-mini (fast/cheap)
         )
@@ -155,3 +182,62 @@ class IntentClassifier:
             print(f"[IntentClassifier]   Entities: {[(e.type, e.value) for e in response.entities]}")
         
         return response
+    
+    def _format_conversation_context(
+        self,
+        session_entities: dict[str, str],
+        recent_turns: list[ConversationTurn],
+        conversation_summary: str = ""
+    ) -> str:
+        """
+        Format conversation history into a text block for the classifier prompt.
+        
+        This method builds a human-readable summary of:
+        1. Conversation summary (compressed older turns)
+        2. Session entities (accumulated state across all turns)
+        3. Recent turns (sliding window of last K turns)
+        
+        Returns empty string if no history exists (first turn).
+        
+        WORKSHOP NOTE:
+        This is the key to multi-turn context. The classifier sees:
+        - Compressed summary of older conversation (progressive summarization)
+        - What entities have been mentioned (booking_id, flight, etc.)
+        - What topics were discussed recently
+        - How the conversation has flowed
+        
+        This enables follow-up questions like "What about my refund?" to
+        route correctly based on prior cancellation discussion.
+        """
+        parts = []
+        
+        # =====================================================================
+        # CONVERSATION SUMMARY: Compressed older turns
+        # =====================================================================
+        if conversation_summary:
+            parts.append("\nCONVERSATION SUMMARY (older turns, compressed):")
+            parts.append(conversation_summary)
+        
+        # =====================================================================
+        # SESSION ENTITIES: Accumulated state from all prior turns
+        # =====================================================================
+        if session_entities:
+            parts.append("\nSESSION ENTITIES (known from prior conversation):")
+            for entity_type, value in session_entities.items():
+                parts.append(f"- {entity_type}: {value}")
+        
+        # =====================================================================
+        # RECENT TURNS: Sliding window of last K turns for context
+        # =====================================================================
+        if recent_turns:
+            parts.append("\nRECENT CONVERSATION (for context):")
+            # recent_turns is newest-first, reverse for chronological display
+            for i, turn in enumerate(reversed(recent_turns), 1):
+                parts.append(f"[Turn {i}] User: \"{turn.user_input}\"")
+                parts.append(f"         Routed to: {turn.intent} (confidence: {turn.confidence:.2f})")
+        
+        # Return formatted block or empty string
+        if parts:
+            parts.append("")  # trailing newline
+            return "\n".join(parts)
+        return ""

@@ -1,6 +1,6 @@
 # Start both frontend and backend
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$src2Dir = Split-Path -Parent (Split-Path -Parent $scriptDir)
+$src2Dir = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $scriptDir))
 $venvPath = Join-Path $src2Dir "../.venv/Scripts/Activate.ps1"
 
 # Check if virtual environment exists

@@ -1,7 +1,7 @@
 # Activate script for Deterministic Airlines virtual environment
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$projectRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $scriptDir))
+$projectRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $scriptDir)))
 $venvPath = Join-Path $projectRoot ".venv"
 $activatePath = Join-Path $venvPath "Scripts\Activate.ps1"
 

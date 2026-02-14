@@ -82,3 +82,54 @@ class IMemoryStore(Protocol):
             session_id: Unique identifier for the conversation
         """
         ...
+    
+    def get_summary(self, session_id: str) -> str:
+        """
+        Get the progressive conversation summary.
+        
+        This contains compressed facts from turns that fell off
+        the sliding window. Returns empty string if no summary.
+        
+        Args:
+            session_id: Unique identifier for the conversation
+        """
+        ...
+    
+    def save_summary(self, session_id: str, summary: str) -> None:
+        """
+        Save the updated progressive summary.
+        
+        Called after folding a turn into the summary.
+        
+        Args:
+            session_id: Unique identifier for the conversation
+            summary: The updated summary text
+        """
+        ...
+    
+    def pop_oldest_turn(self, session_id: str) -> ConversationTurn | None:
+        """
+        Remove and return the oldest turn from the session.
+        
+        Used when folding a turn into the summary - the turn
+        is removed from the turns list after compression.
+        
+        Args:
+            session_id: Unique identifier for the conversation
+            
+        Returns:
+            The oldest ConversationTurn, or None if no turns exist
+        """
+        ...
+    
+    def get_turn_count(self, session_id: str) -> int:
+        """
+        Get the total number of turns stored for a session.
+        
+        Args:
+            session_id: Unique identifier for the conversation
+            
+        Returns:
+            Number of turns currently stored
+        """
+        ...

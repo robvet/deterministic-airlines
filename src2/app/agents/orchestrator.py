@@ -30,13 +30,14 @@ DEBUGGING WALKTHROUGH:
 """
 
 from ..models.agent_models import AgentResponse
-from ..models.classification import ClassificationResponse
+from ..models.classification import ClassificationRequest, ClassificationResponse
 from ..models.context import AgentContext
 from ..memory import IMemoryStore, ConversationTurn
 from ..services.intent_classifier import IntentClassifier
 from ..services.llm_service import LLMService
 from ..services.nl_response_generator import NLResponseGenerator
 from ..services.prompt_template_service import PromptTemplateService
+from ..services.conversation_summarizer import ConversationSummarizer
 from ..tools.tool_registry import ToolRegistry
 from ..config.settings import settings
 
@@ -76,6 +77,9 @@ class OrchestratorAgent:
         
         # Create the NL response generator
         self._nl_generator = NLResponseGenerator(llm_service, template_service)
+        
+        # Create the conversation summarizer (for progressive summarization)
+        self._summarizer = ConversationSummarizer(llm_service, template_service)
         
         print(f"[OrchestratorAgent] Initialized")
     
@@ -130,11 +134,45 @@ class OrchestratorAgent:
             )
         
         # =================================================================
-        # STEP 1: CLASSIFY INTENT
+        # STEP 0: LOAD CONVERSATION CONTEXT FROM MEMORY
         # -----------------------------------------------------------------
-        # Calls IntentClassifier with:
-        #   - user_input: raw message from user
-        #   - available_tools: list of registered tools for LLM to pick from
+        # MULTI-TURN CONTEXT PATTERN:
+        # Before classifying, we load prior conversation state:
+        #   - conversation_summary: Compressed older turns (progressive summarization)
+        #   - session_entities: Accumulated entities across ALL turns
+        #   - recent_turns: Last K turns (sliding window)
+        #
+        # This enables the classifier to understand follow-up questions:
+        #   "What's my refund status?" → knows about prior cancellation
+        #
+        # WHY BEFORE CLASSIFICATION:
+        # The classifier needs context to make informed routing decisions.
+        # Without it, ambiguous queries route incorrectly.
+        # =================================================================
+        session_id = context.customer_name  # Demo uses customer_name as session
+        conversation_summary = self._memory.get_summary(session_id)
+        session_entities = self._memory.get_entities(session_id)
+        recent_turns = self._memory.get_turns(session_id, limit=settings.context_window_size)
+        
+        if session_entities or recent_turns or conversation_summary:
+            has_summary = "with summary" if conversation_summary else "no summary"
+            print(f"[Orchestrator] Loaded context: {len(session_entities)} entities, {len(recent_turns)} recent turns, {has_summary}")
+        
+        # =================================================================
+        # STEP 1: BUILD CLASSIFICATION REQUEST + CLASSIFY INTENT
+        # -----------------------------------------------------------------
+        # STRUCTURED REQUEST PATTERN:
+        # Instead of passing loose parameters, we bundle everything into
+        # a typed ClassificationRequest object. This:
+        #   - Ensures type safety (Pydantic validation)
+        #   - Makes the contract explicit
+        #   - Enables easy testing (construct request objects)
+        #
+        # The classifier receives:
+        #   - user_input: current turn's raw message
+        #   - available_tools: registered tools for LLM to pick from
+        #   - session_entities: accumulated state (e.g., booking_id)
+        #   - recent_turns: sliding window of recent conversation
         #
         # Returns ClassificationResponse:
         #   - intent: "faq", "booking", etc. (which tool to use)
@@ -144,7 +182,16 @@ class OrchestratorAgent:
         #   - entities: extracted info (dates, locations, etc.)
         # =================================================================
         available_tools = self._registry.get_routing_descriptions()
-        classification = self._classifier.classify(user_input, available_tools)
+        
+        classification_request = ClassificationRequest(
+            user_input=user_input,
+            available_tools=available_tools,
+            session_entities=session_entities,
+            recent_turns=recent_turns,
+            conversation_summary=conversation_summary
+        )
+        
+        classification = self._classifier.classify(classification_request)
         
         # =================================================================
         # Step 2: RECEIVE + VALIDATE CLASSIFICATION FROM INTENT
@@ -423,3 +470,57 @@ class OrchestratorAgent:
         # Use customer_name as session_id (in production, use a real session ID)
         session_id = context.customer_name
         self._memory.save_turn(session_id, turn)
+        
+        # =====================================================================
+        # STEP 10: PROGRESSIVE SUMMARIZATION (fold old turns if window overflows)
+        # ---------------------------------------------------------------------
+        # SLIDING WINDOW + PROGRESSIVE SUMMARIZATION PATTERN:
+        # When we have more turns than context_window_size, the oldest turn
+        # outside the window gets "folded" into a compressed summary.
+        #
+        # EXAMPLE: context_window_size = 3
+        #   Turn 9 arrives → fold turn 6 into summary → window = [7, 8, 9]
+        #
+        # The summary preserves key facts without sending full history to LLM.
+        # Uses the same fast SLM as classification (cheap, fast, sufficient).
+        # =====================================================================
+        self._maybe_fold_oldest_turn(session_id)
+    
+    def _maybe_fold_oldest_turn(self, session_id: str) -> None:
+        """
+        Fold the oldest turn into the summary if window overflows.
+        
+        Called after every save_turn. Checks if total turns exceeds
+        the context_window_size and folds the oldest turn if needed.
+        
+        SLIDING WINDOW PATTERN:
+        - We keep exactly K turns in the sliding window
+        - When turn K+1 arrives, turn 1 gets folded into summary
+        - Summary is compressed text, not full conversation
+        
+        Uses ConversationSummarizer with the fast SLM (gpt-4.1-mini).
+        """
+        turn_count = self._memory.get_turn_count(session_id)
+        window_size = settings.context_window_size
+        
+        # Only fold if we have more turns than the window allows
+        if turn_count <= window_size:
+            return
+        
+        print(f"[Orchestrator] Window overflow ({turn_count} > {window_size}) - folding oldest turn")
+        
+        # Get the oldest turn (will be removed after folding)
+        oldest_turn = self._memory.pop_oldest_turn(session_id)
+        if not oldest_turn:
+            return
+        
+        # Get existing summary (may be empty for first fold)
+        existing_summary = self._memory.get_summary(session_id)
+        
+        # Fold the turn into the summary using SLM
+        updated_summary = self._summarizer.fold_turn(oldest_turn, existing_summary)
+        
+        # Save the updated summary
+        self._memory.save_summary(session_id, updated_summary)
+        
+        print(f"[Orchestrator] ✓ Folded turn into summary, window now has {self._memory.get_turn_count(session_id)} turns")
