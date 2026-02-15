@@ -3,6 +3,7 @@ from .context import AgentContext
 from .agent_models import AgentResponse
 from .classification import ClassificationResponse, Entity
 from .faq import FAQRequest, FAQResponse
+from .reflection import ReflectionResponse
 
 __all__ = [
     "AgentContext", 
@@ -10,5 +11,6 @@ __all__ = [
     "ClassificationResponse", 
     "Entity",
     "FAQRequest", 
-    "FAQResponse"
+    "FAQResponse",
+    "ReflectionResponse"
 ]

@@ -40,8 +40,8 @@ still handling unrecognized requests gracefully.
 # See: app/models/classification/response.py
 from ..models.classification import ClassificationRequest, ClassificationResponse
 from ..memory.models import ConversationTurn
-from .llm_service import LLMService
-from .prompt_template_service import PromptTemplateService
+from ..services.llm_service import LLMService
+from ..services.prompt_template_service import PromptTemplateService
 
 
 class IntentClassifier:

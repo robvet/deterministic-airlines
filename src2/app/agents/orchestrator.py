@@ -33,11 +33,12 @@ from ..models.agent_models import AgentResponse
 from ..models.classification import ClassificationRequest, ClassificationResponse
 from ..models.context import AgentContext
 from ..memory import IMemoryStore, ConversationTurn
-from ..services.intent_classifier import IntentClassifier
+from ..intent import IntentClassifier
 from ..services.llm_service import LLMService
 from ..services.nl_response_generator import NLResponseGenerator
 from ..services.prompt_template_service import PromptTemplateService
 from ..services.conversation_summarizer import ConversationSummarizer
+from ..reflection import ReflectionEvaluator
 from ..tools.tool_registry import ToolRegistry
 from ..config.settings import settings
 
@@ -80,6 +81,9 @@ class OrchestratorAgent:
         
         # Create the conversation summarizer (for progressive summarization)
         self._summarizer = ConversationSummarizer(llm_service, template_service)
+        
+        # Create the reflection evaluator (for multi-step intent handling)
+        self._reflector = ReflectionEvaluator(llm_service, template_service)
         
         print(f"[OrchestratorAgent] Initialized")
     
@@ -240,47 +244,137 @@ class OrchestratorAgent:
             return response
         
         # =================================================================
-        # STEP 4: VERIFY TOOL EXISTS IN REGISTRY
+        # STEP 4: REFLECTION LOOP — execute, reflect, re-classify if needed
         # -----------------------------------------------------------------
-        # Safety check: classifier might return an intent that doesn't
-        # match any registered tool (e.g., hallucinated tool name).
-        # If so, fall back gracefully rather than crash.
+        # MULTI-STEP INTENT PATTERN:
+        # Instead of single-pass classify→execute, we loop:
+        #   1. Execute tool for current classification
+        #   2. Reflect: is the user's FULL request satisfied?
+        #   3. If not, re-classify the remaining request
+        #   4. Repeat (bounded by MAX_STEPS)
+        #
+        # For single-intent requests (90%+ of cases), the loop runs once
+        # and reflection says "satisfied" — identical to the old behavior.
+        #
+        # For multi-intent requests (e.g., "check my flight AND baggage"):
+        #   Step 1: flight_status tool → reflection says "baggage not addressed"
+        #   Step 2: re-classify "baggage" → baggage tool → reflection says "satisfied"
+        #
+        # MAX_STEPS bounds the loop to prevent runaway chains.
         # =================================================================
-        if not self._registry.has_tool(classification.intent):
-            print(f"[Orchestrator] WARNING: Unknown intent '{classification.intent}'")
-            response = self._handle_fallback(user_input, classification)
-            self._save_turn(context, user_input, response, classification)
-            return response
+        MAX_STEPS = 3
+        executed_steps = []
+        tool_responses = []  # list of (tool_response, classification) tuples
+        current_classification = classification
+        
+        for step in range(MAX_STEPS):
+            # Verify tool exists in registry
+            if not self._registry.has_tool(current_classification.intent):
+                print(f"[Orchestrator] WARNING: Unknown intent '{current_classification.intent}'")
+                if not tool_responses:
+                    # No results yet — fallback
+                    response = self._handle_fallback(user_input, current_classification)
+                    self._save_turn(context, user_input, response, classification)
+                    return response
+                break  # Have partial results, proceed to NL generation
+            
+            # Execute tool — returns structured data only
+            tool_response = self._run_tool(current_classification, context)
+            tool_responses.append((tool_response, current_classification))
+            
+            # Build step summary for reflection context
+            step_summary = getattr(tool_response, 'reasoning', type(tool_response).__name__)
+            executed_steps.append({
+                'intent': current_classification.intent,
+                'summary': step_summary
+            })
+            print(f"[Orchestrator] ✓ Step {step + 1}: executed '{current_classification.intent}'")
+            
+            # Reflect — is the user's full request satisfied?
+            # Skip reflection on last allowed step (will exit loop anyway)
+            if step < MAX_STEPS - 1:
+                reflection = self._reflector.evaluate(user_input, executed_steps)
+                
+                if reflection.satisfied or not reflection.remaining_request:
+                    print(f"[Orchestrator] Reflection: satisfied after {step + 1} step(s)")
+                    break
+                
+                # Re-classify the remaining request
+                print(f"[Orchestrator] Reflection: remaining work → '{reflection.remaining_request}'")
+                remaining_request = ClassificationRequest(
+                    user_input=reflection.remaining_request,
+                    available_tools=available_tools,
+                    session_entities=session_entities,
+                    recent_turns=recent_turns,
+                    conversation_summary=conversation_summary
+                )
+                current_classification = self._classifier.classify(remaining_request)
+                
+                # If not confident about remaining request, stop with what we have
+                if current_classification.confidence < execute_threshold:
+                    print(f"[Orchestrator] Low confidence on remaining ({current_classification.confidence:.2f}) — stopping")
+                    break
         
         # =================================================================
-        # STEP 5: GET TOOL FROM REGISTRY AND EXECUTE
+        # STEP 5: GENERATE NL FROM ACCUMULATED TOOL RESULTS
         # -----------------------------------------------------------------
-        # High confidence (>= 0.7) - execute the tool.
-        # Uses the REWRITTEN prompt (cleaner, more focused).
-        # Returns standardized AgentResponse.
-        # NOTE: _execute_tool handles its own _save_turn call since it
-        # has access to tool_reasoning from FAQResponse.
+        # Single tool result → use existing generate() (identical to before)
+        # Multiple tool results → use generate_combined() for one coherent response
         # =================================================================
-        response = self._execute_tool(user_input, classification, context)
-        return response
+        if len(tool_responses) == 1:
+            tool_resp, cls = tool_responses[0]
+            answer = self._nl_generator.generate(
+                tool_response=tool_resp,
+                intent=cls.intent,
+                original_question=user_input,
+                context=context
+            )
+        else:
+            answer = self._nl_generator.generate_combined(
+                tool_results=tool_responses,
+                original_question=user_input,
+                context=context
+            )
+        print(f"[Orchestrator] ✓ Generated NL response ({len(answer)} chars)")
+        
+        # =================================================================
+        # STEP 6: BUILD FINAL AGENT RESPONSE
+        # -----------------------------------------------------------------
+        # Wrap the generated NL in a standardized AgentResponse.
+        # Uses the FIRST classification for routing metadata (primary intent).
+        # =================================================================
+        primary_cls = tool_responses[0][1]
+        final_response = AgentResponse(
+            answer=answer,
+            routed_to=primary_cls.intent,
+            confidence=primary_cls.confidence,
+            original_input=user_input,
+            rewritten_input=primary_cls.rewritten_prompt,
+            entities=[{"type": e.type, "value": e.value} for e in primary_cls.entities]
+        )
+        print(f"[Orchestrator] ✓ Built AgentResponse, returning to user")
+        
+        # Save turn with tool reasoning from last executed tool
+        tool_reasoning = getattr(tool_responses[-1][0], 'reasoning', None)
+        self._save_turn(context, user_input, final_response, classification, tool_reasoning=tool_reasoning)
+        return final_response
     
-    # Executes tool called by process_request after classification, returns AgentResponse
-    def _execute_tool(
+    def _run_tool(
         self,
-        original_input: str,
         classification: ClassificationResponse,
         context: AgentContext
-    ) -> AgentResponse:
+    ):
         """
-        Get the tool from registry, execute it, and generate NL response.
+        Get the tool from registry and execute it. Returns structured data only.
         
-        Called when confidence >= 0.7 (high confidence routing).
-        Uses rewritten_prompt instead of original for cleaner input.
+        Called from the reflection loop in process_request().
+        Does NOT generate NL or build AgentResponse — the loop handles that
+        after all steps are complete.
         
         ARCHITECTURAL PATTERN:
         1. Tool returns STRUCTURED DATA (facts, confidence, reasoning)
-        2. Orchestrator generates NATURAL LANGUAGE from structured data
-        3. Single point of NL generation ensures consistency
+        2. NL generation happens AFTER the reflection loop exits
+        3. This keeps the loop focused on structured data only
         """
         print(f"[Orchestrator] Routing to: {classification.intent}")
         
@@ -292,15 +386,12 @@ class OrchestratorAgent:
         )
         
         # =================================================================
-        # Step 6: BUILD STRUCTURED REQUEST FOR TOOL
+        # BUILD STRUCTURED REQUEST FOR TOOL
         # -----------------------------------------------------------------
         # PATTERN: Open/Closed Principle (SOLID)
         # 
         # Each tool knows how to build its own request from classification.
         # This eliminates the switch statement - tool owns its request type.
-        #
-        # BENEFIT: To add a new tool, you create a new class with its own
-        # build_request() method. The orchestrator never needs modification.
         # - Open for extension (add new tools freely)
         # - Closed for modification (orchestrator code unchanged)
         # =================================================================
@@ -310,52 +401,10 @@ class OrchestratorAgent:
         # Execute the tool - returns STRUCTURED DATA (not NL)
         tool_response = tool.execute(request, context)
         
-        # =================================================================
-        # Step 7: RECEIVE + VALIDATE STRUCTURED RESPONSE FROM TOOL
-        # -----------------------------------------------------------------
-        # DETERMINISTIC PATTERN: Validate all responses from external calls.
-        # Tool responses now contain structured data, not NL answers.
-        # =================================================================
         print(f"[Orchestrator] ✓ Received structured response from {classification.intent}")
         print(f"[Orchestrator]   Response type: {type(tool_response).__name__}")
         
-        # =================================================================
-        # Step 8: GENERATE NATURAL LANGUAGE FROM STRUCTURED DATA
-        # -----------------------------------------------------------------
-        # NLResponseGenerator handles NL generation (extracted class).
-        # Tools return structured data, generator converts to NL.
-        # =================================================================
-        answer = self._nl_generator.generate(
-            tool_response=tool_response,
-            intent=classification.intent,
-            original_question=original_input,
-            context=context
-        )
-        print(f"[Orchestrator] ✓ Generated NL response ({len(answer)} chars)")
-        
-        # =================================================================
-        # Step 9: BUILD FINAL AGENT RESPONSE
-        # -----------------------------------------------------------------
-        # Wrap the generated NL in a standardized AgentResponse.
-        # This is the final output that goes back to the user.
-        # =================================================================
-        final_response = AgentResponse(
-            answer=answer,
-            routed_to=classification.intent,
-            confidence=classification.confidence,
-            original_input=original_input,
-            rewritten_input=classification.rewritten_prompt,
-            entities=[{"type": e.type, "value": e.value} for e in classification.entities]
-        )
-        print(f"[Orchestrator] ✓ Built AgentResponse, returning to user")
-        
-        # Save with tool reasoning for visibility
-        tool_reasoning = getattr(tool_response, 'reasoning', None)
-        self._save_turn(
-            context, original_input, final_response, classification,
-            tool_reasoning=tool_reasoning
-        )
-        return final_response
+        return tool_response
     
     def _handle_clarification(
         self,
