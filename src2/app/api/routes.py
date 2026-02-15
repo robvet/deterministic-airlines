@@ -179,7 +179,7 @@ async def chat(
         )
     except LLMValidationError as e:
         # LLM returned invalid response - return graceful fallback
-        print(f"[Routes] LLM validation error: {e.message}")
+        print(f"[Routes] LLM validation error: {str(e)}")
         return ChatResponse(
             answer="I apologize, but I encountered an issue processing your request. Could you please rephrase your question or try again?",
             routed_to="error",

@@ -71,20 +71,35 @@ class IntentClassifier:
     # Main method to classify the intent for each user input
     def classify(
         self, 
-        request: ClassificationRequest  # Structured request with user input + context
+        user_input: str,
+        available_tools: str,
+        session_entities: dict[str, str] | None = None,
+        recent_turns: list[ConversationTurn] | None = None,
+        conversation_summary: str = ""
     ) -> ClassificationResponse:
         """
         Classify intent by sending the user prompt and conversation context to an SLM.
         
         Args:
-            request: ClassificationRequest containing user_input, available_tools,
-                     session_entities (accumulated), and recent_turns (sliding window)
+            user_input: The raw user message
+            available_tools: Formatted list of registered tools for LLM to pick from
+            session_entities: Accumulated entities from prior turns (e.g., booking_id)
+            recent_turns: Sliding window of recent conversation turns
+            conversation_summary: Compressed summary of older turns
         
         Returns:
             ClassificationResponse with intent, confidence, entities, rewritten_prompt
         
         DEBUGGING: Step into this method to see classification in action.
         """
+        # Build the internal request object (callers don't need to know about it)
+        request = ClassificationRequest(
+            user_input=user_input,
+            available_tools=available_tools,
+            session_entities=session_entities or {},
+            recent_turns=recent_turns or [],
+            conversation_summary=conversation_summary
+        )
         # =================================================================
         # STEP 0: FORMAT CONVERSATION CONTEXT (if any history exists)
         # -----------------------------------------------------------------
